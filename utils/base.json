@@ -9233,6 +9233,7 @@
       {"type_": "REG", "values": ["tsc"], "src": true, "dest": false, "width": 64}
     ]
   },
+
   {"name": "repe cmpsb", "category": "BASE-STRINGOP", "control_flow": false,
     "operands": [
       
@@ -9508,6 +9509,17 @@
       {"type_": "FLAGS", "values": ["", "", "", "", "", "", "", "r", ""], "src": false, "dest": false, "width": 0}
     ]
   },
+  {"name": "rep movsb", "category": "BASE-STRINGOP", "control_flow": false,
+    "operands": [
+      
+    ],
+    "implicit_operands": [
+      {"type_": "MEM", "values": ["rdi"], "src": false, "dest": true, "width": 8},
+      {"type_": "MEM", "values": ["rsi"], "src": true, "dest": false, "width": 8},
+      {"type_": "REG", "values": ["rcx"], "src": true, "dest": true, "width": 64},
+      {"type_": "FLAGS", "values": ["", "", "", "", "", "", "", "r", ""], "src": false, "dest": false, "width": 0}
+    ]
+  },
   {"name": "repne movsb", "category": "BASE-STRINGOP", "control_flow": false,
     "operands": [
       
@@ -9530,6 +9542,17 @@
       {"type_": "FLAGS", "values": ["", "", "", "", "", "", "", "r", ""], "src": false, "dest": false, "width": 0}
     ]
   },
+  {"name": "rep movsd", "category": "BASE-STRINGOP", "control_flow": false,
+    "operands": [
+      
+    ],
+    "implicit_operands": [
+      {"type_": "MEM", "values": ["rdi"], "src": false, "dest": true, "width": 32},
+      {"type_": "MEM", "values": ["rsi"], "src": true, "dest": false, "width": 32},
+      {"type_": "REG", "values": ["rcx"], "src": true, "dest": true, "width": 64},
+      {"type_": "FLAGS", "values": ["", "", "", "", "", "", "", "r", ""], "src": false, "dest": false, "width": 0}
+    ]
+  },
   {"name": "repne movsd", "category": "BASE-STRINGOP", "control_flow": false,
     "operands": [
       
@@ -9542,6 +9565,17 @@
     ]
   },
   {"name": "repe movsw", "category": "BASE-STRINGOP", "control_flow": false,
+    "operands": [
+      
+    ],
+    "implicit_operands": [
+      {"type_": "MEM", "values": ["rdi"], "src": false, "dest": true, "width": 16},
+      {"type_": "MEM", "values": ["rsi"], "src": true, "dest": false, "width": 16},
+      {"type_": "REG", "values": ["rcx"], "src": true, "dest": true, "width": 64},
+      {"type_": "FLAGS", "values": ["", "", "", "", "", "", "", "r", ""], "src": false, "dest": false, "width": 0}
+    ]
+  },
+  {"name": "rep movsw", "category": "BASE-STRINGOP", "control_flow": false,
     "operands": [
       
     ],
@@ -9640,6 +9674,17 @@
       {"type_": "FLAGS", "values": ["", "", "", "", "", "", "", "r", ""], "src": false, "dest": false, "width": 0}
     ]
   },
+  {"name": "rep stosb", "category": "BASE-STRINGOP", "control_flow": false,
+    "operands": [
+      
+    ],
+    "implicit_operands": [
+      {"type_": "MEM", "values": ["rdi"], "src": false, "dest": true, "width": 8},
+      {"type_": "REG", "values": ["al"], "src": true, "dest": false, "width": 8},
+      {"type_": "REG", "values": ["rcx"], "src": true, "dest": true, "width": 64},
+      {"type_": "FLAGS", "values": ["", "", "", "", "", "", "", "r", ""], "src": false, "dest": false, "width": 0}
+    ]
+  },
   {"name": "repne stosb", "category": "BASE-STRINGOP", "control_flow": false,
     "operands": [
       
@@ -9662,6 +9707,17 @@
       {"type_": "FLAGS", "values": ["", "", "", "", "", "", "", "r", ""], "src": false, "dest": false, "width": 0}
     ]
   },
+   {"name": "rep stosd", "category": "BASE-STRINGOP", "control_flow": false,
+    "operands": [
+      
+    ],
+    "implicit_operands": [
+      {"type_": "MEM", "values": ["rdi"], "src": false, "dest": true, "width": 32},
+      {"type_": "REG", "values": ["eax"], "src": true, "dest": false, "width": 32},
+      {"type_": "REG", "values": ["rcx"], "src": true, "dest": true, "width": 64},
+      {"type_": "FLAGS", "values": ["", "", "", "", "", "", "", "r", ""], "src": false, "dest": false, "width": 0}
+    ]
+  },
   {"name": "repne stosd", "category": "BASE-STRINGOP", "control_flow": false,
     "operands": [
       
@@ -9674,6 +9730,17 @@
     ]
   },
   {"name": "repe stosw", "category": "BASE-STRINGOP", "control_flow": false,
+    "operands": [
+      
+    ],
+    "implicit_operands": [
+      {"type_": "MEM", "values": ["rdi"], "src": false, "dest": true, "width": 16},
+      {"type_": "REG", "values": ["ax"], "src": true, "dest": false, "width": 16},
+      {"type_": "REG", "values": ["rcx"], "src": true, "dest": true, "width": 64},
+      {"type_": "FLAGS", "values": ["", "", "", "", "", "", "", "r", ""], "src": false, "dest": false, "width": 0}
+    ]
+  },
+  {"name": "rep stosw", "category": "BASE-STRINGOP", "control_flow": false,
     "operands": [
       
     ],

@@ -6,6 +6,7 @@ from argparse import ArgumentParser, ArgumentTypeError
 import os
 import random
 from abc import ABC, abstractmethod
+from unicodedata import category
 from utils.utils import flatten
 
 
@@ -17,10 +18,13 @@ register_allowlist = {
 }
 
 register_blocklist = {
-    64 : ['rbp', 'rsp', 'rip', 'r15'],
-    32 : ['ebp', 'esp', 'eip', 'r15d'],
-    16 : ['bp', 'sp', 'ip', 'r15w'],
-    8 : ['r15b']
+    64 : ['rbp', 'rsp', 'rip', 'r14', 'r15'],
+    32 : ['ebp', 'esp', 'eip', 'r14d', 'r15d'],
+    16 : ['bp', 'sp', 'ip', 'r14w','r15w'],
+    8 : ['bpl', 'spl', 'r14b','r15b', 'ah', 'bh', 'ch', 'dh'],
+    "other" : ["cr0", "cr2", "cr3", "cr4", "cr8",
+               "dr0", "dr1", "dr2", "dr3", "dr4", "dr5", "dr6", "dr7",
+               "fs"]
 }
 
 memory_register_list = {
@@ -30,11 +34,6 @@ memory_register_list = {
     8  : ['r8b', 'r9b', 'r10b', 'r11b', 'r12b', 'r13b']
 }
 base_register = "r14"
-
-# Cause overlapping encodings in x86-64 assembly using GAS with intel syntax
-exclude_registers = [
-    'ah', 'bh', 'ch', 'dh'
-]
 
 class OT(Enum):
     """Operand Type"""
@@ -97,19 +96,17 @@ class OperandSpec:
     signed: bool = True
     src: bool
     dest: bool
-    is_empty = False
 
     # certain operand values have special handling (e.g., separate opcode when RAX is a destination)
     # magic_value attribute indicates a specification for this special value
     magic_value: bool = False
 
-    def __init__(self, values: List[str], type_: OT, src: bool, dest: bool, is_empty: bool):
+    def __init__(self, values: List[str], type_: OT, src: bool, dest: bool):
         self.values = values
         self.type = type_
         self.src = src
         self.dest = dest
         self.width = 0
-        self.is_empty = is_empty
 
     def __str__(self):
         return f"{self.values}"
@@ -174,7 +171,8 @@ class InstructionSet():
         with open(filename, "r") as f:
             root = json.load(f)
         for instruction_node in root:
-            if ((include_only == None) or (instruction_node["name"] in include_only)) and instruction_node["control_flow"] == False:
+            if ((include_only == None) or (instruction_node["name"] in include_only)) and instruction_node["control_flow"] == False \
+            and (not instruction_node["category"].startswith("SSE")):
                 instruction = InstructionSpec()
                 instruction.name = instruction_node["name"]
                 instruction.category = instruction_node["category"]
@@ -190,17 +188,21 @@ class InstructionSet():
                     op = self.parse_operand(op_node, instruction)
                     instruction.implicit_operands.append(op)
 
-                self.instructions.append(instruction)
+                if not instruction.has_empty_operand:
+                    self.instructions.append(instruction)
 
     def parse_operand(self, op: Dict, parent: InstructionSpec) -> OperandSpec:
         op_type = self.ot_str_to_enum[op["type_"]]
         op_values = op.get("values", [])
-        op_values2 = [val for val in op_values if val not in exclude_registers]
+        op_values2 = [val for val in op_values if not val in flatten(register_blocklist.values())]
         if op_type == "REG":
+            if op_values2 == []:
+                parent.has_empty_operand = True
             op_values2 = sorted(op_values2)
+            
         # if op_type == "MEM" and op_values2 != []:
         #     print(op_values2)
-        spec = OperandSpec(op_values2, op_type, op["src"], op["dest"], len(op_values2) == 0)
+        spec = OperandSpec(op_values2, op_type, op["src"], op["dest"])
         spec.width = op["width"]
         spec.signed = op.get("signed", False)
 
@@ -255,11 +257,10 @@ class InstructionSet():
 def generate_reg_operand(spec: OperandSpec) -> Operand:
         choices = []
         if spec.values:
-            choices = [val for val in spec.values if (not val in flatten(memory_register_list.values())) and
-                       val != "r14" and val != "r14d" and val != "r14w" and val != "r14b" and
-                       (not val in flatten(register_blocklist.values()))]
-        else: 
+            choices = [val for val in spec.values if (not val in flatten(register_blocklist.values()))]
+        else:
             choices = register_allowlist[spec.width]
+
         return random.choice(choices)
 
 def generate_mem_operand(spec: OperandSpec) -> Operand:
@@ -369,23 +370,34 @@ def generate_test_cases(num_test_cases : int, program_size : int, mem_accesses :
             code = [] 
             for j in range(program_size):
                 inst = ""
-                while True:
-                    if j not in mem_access_indices:
-                        inst_desc = random.choice(instruction_spec.non_memory_access_instructions)
-                    else:
-                        inst_desc = random.choice(instruction_spec.memory_access_instructions)
-                    if not inst_desc.has_empty_operand:
-                        break
+                if j not in mem_access_indices:
+                    inst_desc = random.choice(instruction_spec.non_memory_access_instructions)
+                else:
+                    inst_desc = random.choice(instruction_spec.memory_access_instructions)
 
                 inst += inst_desc.name + " "
                 num_operands = len(inst_desc.operands)
                 operand_indices = list(range(num_operands))
                 # if inst_desc.name == "test":
                 #     print([operand.values for operand in inst_desc.operands if operand.type==OT.REG])
+
+                # SPECIAL CASE: BASE-STRINGOP implicitly accesses mem and needs alignment
+                if inst_desc.category == "BASE-STRINGOP":
+                    code.append("lea rsi, [r14]\n")
+                    code.append("lea rdi, [r14 + 4096]\n")
+                    if inst_desc.name.startswith('rep'):
+                        align_mask = 0xFF
+                        code.append(f"and rcx, {align_mask}\n")
+
                 for (op, ind) in zip(inst_desc.operands, operand_indices):
                     op_str = ""
                     if op.type == OT.REG:
                         op_str = generate_reg_operand(op)
+                        # SPECIAL CASE: if BT, BTC, BTS, BTR need to align the operand
+                        if op.src and inst_desc.name.startswith('bt'):
+                            align_mask = 0xFF  # Only lower 8 bits are kepts
+                            align_inst = f"and {op_str}, {align_mask}\n"
+                            code.append(align_inst) 
                     elif op.type == OT.MEM:
                         op_str = generate_mem_operand(op)
                     elif op.type == OT.IMM:

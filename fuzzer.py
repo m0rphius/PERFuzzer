@@ -96,7 +96,7 @@ def run():
     print(f"Running {num_test_cases}\n test cases...")
     
     for i in range(num_test_cases):
-        print(f"[{i+1}/{num_test_cases}] Running test case #{i} ==> ", end="\n")
+        print(f"[{i+1}/{num_test_cases}] Running test case #{i}", end="\n")
         bin_filename = f"{outdir}/test{i+1}/test{i+1}.bin"
         try:
             os.system(f"mkdir {outdir}/test{i+1}/results")

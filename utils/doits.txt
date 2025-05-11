@@ -231,12 +231,12 @@ punpcklqdq
 punpcklwd
 push
 pxor
-rep_movsb1
-rep_movsd1
-rep_movsw1
-rep_stosb1
-rep_stosd1
-rep_stosw1
+rep movsb
+rep movsd
+rep movsw
+rep stosb
+rep stosd
+rep stosw
 sar
 sbb
 setb
