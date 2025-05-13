@@ -328,107 +328,93 @@ def generate_agen_operand(spec: OperandSpec) -> Operand:
     op += " + " + imm + "]"
     return op
 
-def generate_test_cases(num_test_cases : int, program_size : int, mem_accesses : int, 
-                        outdir : str, instruction_spec : InstructionSet, chosen_seed : int):
+def generate_test_case(program_size : int, mem_accesses : int, instruction_spec : InstructionSet):
     # ===================================================================================
     # print(len(instruction_spec.instructions))
-    
-    print("\n" + "=" * 70)
-    print(f"Starting Test Case Generation")
-    print(f"params=[num_test_cases={num_test_cases}\n \
-       program_size={program_size}\n \
-       mem_accesses={mem_accesses}\n \
-       outdir={outdir}]")
-    print(f"seed = {chosen_seed}")
-    print (f"Got {len(instruction_spec.instructions)} instructions")
-    print("=" * 70 + "\n")
 
-    # For each test case:
-    for i in range(num_test_cases):
-        # Crate an output file
-        print(f"[{i+1}/{num_test_cases}] Generating test case #{i} ==> ", end="")
-        try:
-            os.system(f"mkdir {outdir}/test{i+1} 2> /dev/null")
-        except:
-            print(f"[ERROR] Couldn't create a directory for test {i+1}!")
-            exit(1)
-        test_filename = f"{outdir}/test{i+1}/test{i+1}.asm"
+    # Crate an output file
+    # print(f"[{i+1}/{num_test_cases}] Generating test case #{i} ==> ", end="")
+    # try:
+    #     os.system(f"mkdir {outdir}/test{i+1} 2> /dev/null")
+    # except:
+    #     print(f"[ERROR] Couldn't create a directory for test {i+1}!")
+    #     exit(1)
+    # test_filename = f"{outdir}/test{i+1}/test{i+1}.asm"
 
-        # Fill the file 
-        with open(test_filename, "w+") as f:
-            # General headers
-            f.write(".intel_syntax noprefix\n")
-            f.write(".global _start\n")
-            f.write("_start:\n")
+    # # Fill the file 
+    # with open(test_filename, "w+") as f:
+    #     # General headers
+    #     f.write(".intel_syntax noprefix\n")
+    #     f.write(".global _start\n")
+    #     f.write("_start:\n")
 
-            # choose "mem_accesses" instructions that will access memory
-            inst_indices = list(range(program_size))
-            random.shuffle(inst_indices)
-            mem_access_indices = inst_indices[0:mem_accesses]
+    # choose "mem_accesses" instructions that will access memory
+    inst_indices = list(range(program_size))
+    random.shuffle(inst_indices)
+    mem_access_indices = inst_indices[0:mem_accesses]
 
-            # Generate code
-            code = [] 
-            for j in range(program_size):
-                inst = ""
-                if j not in mem_access_indices:
-                    inst_desc = random.choice(instruction_spec.non_memory_access_instructions)
-                else:
-                    inst_desc = random.choice(instruction_spec.memory_access_instructions)
+    # Generate code
+    code = "" 
+    for j in range(program_size):
+        inst = ""
+        if j not in mem_access_indices:
+            inst_desc = random.choice(instruction_spec.non_memory_access_instructions)
+        else:
+            inst_desc = random.choice(instruction_spec.memory_access_instructions)
 
-                inst += inst_desc.name + " "
-                num_operands = len(inst_desc.operands)
-                operand_indices = list(range(num_operands))
-                # if inst_desc.name == "test":
-                #     print([operand.values for operand in inst_desc.operands if operand.type==OT.REG])
+        inst += inst_desc.name + " "
+        num_operands = len(inst_desc.operands)
+        operand_indices = list(range(num_operands))
+        # if inst_desc.name == "test":
+        #     print([operand.values for operand in inst_desc.operands if operand.type==OT.REG])
 
-                # SPECIAL CASE: BASE-STRINGOP implicitly accesses mem and needs alignment
-                if inst_desc.category == "BASE-STRINGOP":
-                    code.append("lea rsi, [r14]\n")
-                    code.append("lea rdi, [r14 + 4096]\n")
-                    if inst_desc.name.startswith('rep'):
-                        align_mask = 0xFF
-                        code.append(f"and rcx, {align_mask}\n")
+        # SPECIAL CASE: BASE-STRINGOP implicitly accesses mem and needs alignment
+        if inst_desc.category == "BASE-STRINGOP":
+            code += "lea rsi, [r14]\n"
+            code += "lea rdi, [r14 + 4096]\n"
+            if inst_desc.name.startswith('rep'):
+                align_mask = 0xFF  # at most 255 repetitions
+                code += f"and rcx, {align_mask}\n"
 
-                for (op, ind) in zip(inst_desc.operands, operand_indices):
-                    op_str = ""
-                    if op.type == OT.REG:
-                        op_str = generate_reg_operand(op)
-                        # SPECIAL CASE: if BT, BTC, BTS, BTR need to align the operand
-                        if op.src and inst_desc.name.startswith('bt'):
-                            align_mask = 0xFF  # Only lower 8 bits are kepts
-                            align_inst = f"and {op_str}, {align_mask}\n"
-                            code.append(align_inst) 
-                    elif op.type == OT.MEM:
-                        op_str = generate_mem_operand(op)
-                    elif op.type == OT.IMM:
-                        op_str = generate_imm_operand(op)
-                    # elif op.type == OT.FLAGS:
-                    #     op_str = generate_mem_operand(op)
-                    elif op.type == OT.AGEN:
-                        op_str = generate_agen_operand(op)
-                    inst += op_str + ", "
-                if (num_operands > 0):
-                    inst = inst[:-2] + "\n"
-                else:
-                    inst = inst[:-1] + "\n"
-                code.append(inst)
-            
-            f.writelines(code)    
+        for (op, ind) in zip(inst_desc.operands, operand_indices):
+            op_str = ""
+            if op.type == OT.REG:
+                op_str = generate_reg_operand(op)
+                # SPECIAL CASE: if BT, BTC, BTS, BTR need to align the operand
+                if op.src and inst_desc.name.startswith('bt'):
+                    align_mask = 0xFF  # at most 16 bits are kept
+                    align_inst = f"and {op_str}, {align_mask}\n"
+                    code += align_inst
+            elif op.type == OT.MEM:
+                op_str = generate_mem_operand(op)
+            elif op.type == OT.IMM:
+                op_str = generate_imm_operand(op)
+            # elif op.type == OT.FLAGS:
+            #     op_str = generate_mem_operand(op)
+            elif op.type == OT.AGEN:
+                op_str = generate_agen_operand(op)
+            inst += op_str + ", "
+        if (num_operands > 0):
+            inst = inst[:-2] + "\n"
+        else:
+            inst = inst[:-1] + "\n"
+        code += inst
+    return code   
 
-        print(f"Assembling {test_filename} ==> ", end="")
-        try:
-            os.system(" as -o {obj_file} {asm_file}".format(asm_file=test_filename, obj_file=test_filename[:-4]+".o"))
-        except:
-            print("[ERROR]", "Couldn't assemble {asm_file}!".format(asm_file=test_filename))
-            exit(1)
+        # print(f"Assembling {test_filename} ==> ", end="")
+        # try:
+        #     os.system(" as -o {obj_file} {asm_file}".format(asm_file=test_filename, obj_file=test_filename[:-4]+".o"))
+        # except:
+        #     print("[ERROR]", "Couldn't assemble {asm_file}!".format(asm_file=test_filename))
+        #     exit(1)
         
-        print(f"Creating {test_filename[:-4]+".bin"} ==> ", end="")
-        try:
-            os.system("ld --oformat binary -o {bin_file} {obj_file}".format(obj_file=test_filename[:-4]+".o", bin_file=test_filename[:-4]+".bin"))
-        except:
-            print("[ERROR]", "Couldn't convert {asm_file}!".format(asm_file=test_filename))
-            exit(1)
-        print("Success")
+        # print(f"Creating {test_filename[:-4]+".bin"} ==> ", end="")
+        # try:
+        #     os.system("ld --oformat binary -o {bin_file} {obj_file}".format(obj_file=test_filename[:-4]+".o", bin_file=test_filename[:-4]+".bin"))
+        # except:
+        #     print("[ERROR]", "Couldn't convert {asm_file}!".format(asm_file=test_filename))
+        #     exit(1)
+        # print("Success")
 
 if __name__ == "__main__":
     print("[ERROR]", "This file is not meant to be run directly. Use `fuzzer.py` instead.")

@@ -1,7 +1,14 @@
 from argparse import ArgumentParser, ArgumentTypeError
-from generator import InstructionSet, generate_test_cases
+
+from matplotlib.pylab import rand
+import test
+from generator import InstructionSet, generate_test_case, register_allowlist, memory_register_list
 import os
 import random
+import mmap
+import subprocess
+import tempfile
+import ctypes
 
 def run():
     # ===================================================================================
@@ -10,7 +17,7 @@ def run():
     parser.add_argument("-n",
         "--num-test-cases",
         type=int,
-        default=100,
+        default=10,
         help="Number of test cases to generate.",)
     
     parser.add_argument("-p",
@@ -89,52 +96,39 @@ def run():
         print("ERROR: {s} isn't a directory!".format(s=outdir))
         exit(1)
     # ===================================================================================
-    # Generate test cases
-    generate_test_cases(num_test_cases, program_size, mem_accesses, outdir, instruction_spec, chosen_seed)
-    # Run test cases
-    print("\n" + "=" * 70)
-    print(f"Running {num_test_cases}\n test cases...")
     
+    print("\n" + "=" * 70)
+    print("Params for fuzzer:\n")
+    print(f"num_test_cases={num_test_cases}\nprogram_size={program_size}\nmem_accesses={mem_accesses}\noutdir={outdir}\ncore_id={core_id}\nconfig={config}\ninstruction_filter={args.instruction_filter}\ninstruction_spec={args.instruction_spec} ({len(instruction_spec.instructions)} instructions after filtering)\n")
+    print(f"seed={chosen_seed}")
+    print("=" * 70 + "\n")
+    print(f"Running {num_test_cases} test cases...\n")
+
+    # ===================================================================================
+    # Start fuzzing!
     for i in range(num_test_cases):
         print(f"[{i+1}/{num_test_cases}] Running test case #{i}", end="\n")
-        bin_filename = f"{outdir}/test{i+1}/test{i+1}.bin"
-        try:
-            os.system(f"mkdir {outdir}/test{i+1}/results")
-        except:
-            print("[ERROR]", "Couldn't open result dir for {bin_file}!".format(bin_file=bin_filename))
-            exit(1)
-        for j in range(50):
-            res_filename = f"{outdir}/test{i+1}/results/run{j+1}.res"
-            asm_init_code = "mov rax, {val1}\nmov rbx, {val2}\nmov rcx, {val3}\nmov rdx, {val4}\nmov rdi, {val5}\nmov rsi, {val6}\n" \
-            "mov r8, {val7}\nmov r9, {val8}\nmov r10, {val9}\nmov r11, {val10}\nmov r12, {val11}\nmov r13, {val12}\n".format(
-                val1=random.randint(0, pow(2, 32) - 1),
-                val2=random.randint(0, pow(2, 32) - 1),
-                val3=1,
-                val4=random.randint(0, pow(2, 32) - 1),
-                val5=random.randint(0, pow(2, 32) - 1),
-                val6=random.randint(0, pow(2, 32) - 1),
-                val7=random.randint(0, pow(2, 12) - 1),
-                val8=random.randint(0, pow(2, 12) - 1),
-                val9=random.randint(0, pow(2, 12) - 1),
-                val10=random.randint(0, pow(2, 12) - 1),
-                val11=random.randint(0, pow(2, 12) - 1),
-                val12=random.randint(0, pow(2, 12) - 1),
-            )
-            #print(asm_init_code)
 
-
+        # Generate random test code
+        test_code = '"' + generate_test_case(program_size, mem_accesses, instruction_spec) + '"'
+        # Try inputs
+        num_inputs = 25
+        for j in range(3):
+            # Run nanoBench on test case with increasing number of inputs
+            print(f"Running with {num_inputs} inputs...")
+            outfile = f"{outdir}/test{i+1}_{num_inputs}inputs.res"
+            # print(f"sudo taskset -c {core_id} ./nanoBench.sh -f -unroll 100 -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
             try:
-                os.system("sudo taskset -c {core_id} ./nanoBench.sh -f -unroll 100 -config {conf_file} -code {bin_file} -asm_init "'"{init_code}"'" > {res_file}".format(
-                    core_id=core_id,
-                    bin_file=bin_filename,
-                    init_code=asm_init_code,
-                    res_file=res_filename,
-                    conf_file=config,
-                ))
+                os.system(f"sudo taskset -c {core_id} ./nanoBench.sh -f -unroll 100 -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
             except:
-                print("[ERROR]", "Couldn't run {bin_file}!".format(bin_file=bin_filename))
+                print(f"[ERROR] in test case {i}")
                 exit(1)
-        
+            num_inputs *= 2
 
+    # ===================================================================================
+    # Done fuzzing
+    print("\n" + "=" * 70)
+    print("DONE FUZZING!\n")
+        
 if __name__ == "__main__":
     run()
