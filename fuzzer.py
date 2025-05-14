@@ -23,7 +23,7 @@ def run():
     parser.add_argument("-p",
         "--program-size",
         type=int,
-        default=50,
+        default=30,
         help="Number of instructions per test case (can be larger due to alignment of mem-accesses).",)
     
     parser.add_argument("-cpu",
@@ -47,7 +47,7 @@ def run():
     parser.add_argument("-conf",
         "--config-file",
         type=str,
-        default = "configs/cfg_AlderLakeP_all.txt",
+        default = "configs/cfg_AlderLakeP_common.txt",
         help="Seed for the inputs and test case generation.",)
 
     parser.add_argument("-i",
@@ -119,7 +119,7 @@ def run():
             outfile = f"{outdir}/test{i+1}_{num_inputs}inputs.res"
             # print(f"sudo taskset -c {core_id} ./nanoBench.sh -f -unroll 100 -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
             try:
-                os.system(f"sudo taskset -c {core_id} ./nanoBench.sh -f -unroll 100 -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
+                os.system(f"sudo taskset -c {core_id} ./nanoBench.sh -f -basic_mode -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
             except:
                 print(f"[ERROR] in test case {i}")
                 exit(1)
