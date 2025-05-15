@@ -16,7 +16,7 @@ def compute_statistics(results_filename : str, core_id : int = 0):
     else:
         pfcs_names = pfcs_names_e
 
-    pfcs_info = {pfc: {'mean': 0, 'var': 0, 'n': 0, 'min': -1, 'min_ind': -1, 'max': -1, 'max_ind': -1} for pfc in pfcs_names}
+    pfcs_info = {pfc: {'mean': 0.0, 'var': 0.0, 'stddev': 0.0, 'n': 0, 'min': math.inf, 'min_ind': 0, 'max': -math.inf, 'max_ind': 0} for pfc in pfcs_names}
     # Read file
     with open(results_filename, "r") as f:
         lines = f.readlines()
@@ -39,9 +39,7 @@ def compute_statistics(results_filename : str, core_id : int = 0):
                 mean = pfcs_info[pfc]['mean']
                 var = pfcs_info[pfc]['var']
                 min = pfcs_info[pfc]['min']
-                min_ind = pfcs_info[pfc]['min_ind']
                 max = pfcs_info[pfc]['max']
-                max_ind = pfcs_info[pfc]['max_ind']
 
                 # Update values
                 delta = value - mean
@@ -51,24 +49,31 @@ def compute_statistics(results_filename : str, core_id : int = 0):
                 pfcs_info[pfc]['mean'] = mean
                 pfcs_info[pfc]['var'] = var
                 
-                if min_ind == -1 or value < min:
+                if value < min:
                     pfcs_info[pfc]['min'] = value
                     pfcs_info[pfc]['min_ind'] = input_group
 
-                if max_ind == -1 or value > max:
+                if value > max:
                     pfcs_info[pfc]['max'] = value
                     pfcs_info[pfc]['max_ind'] = input_group
 
+    for pfc_name in pfcs_info.keys():
+            temp = pfcs_info[pfc_name]['var']
+            n = pfcs_info[pfc_name]['n']
+            pfcs_info[pfc_name]['var'] = temp/(n - 1)
+            pfcs_info[pfc_name]['stddev'] = math.sqrt(temp/(n - 1))
+            
     return pfcs_info
 
 # Plot the statistics
-def plot_statistics(pfcs_info):
+def plot_statistics(pfcs_info, outfile):
 
     # Sort by mean
-    sorted_pfc = sorted(pfcs_info.items(), key=lambda x: x[1]['mean'])
+    sorted_pfc = sorted(pfcs_info.items(), key=lambda x: x[0], reverse=True)
+    sorted_pfc = [p for p in sorted_pfc if p[1]['mean'] > 0.0]
     pfc_names = [p[0] for p in sorted_pfc]
     means = [p[1]['mean'] for p in sorted_pfc]
-    stddevs = [p[1]['var'] for p in sorted_pfc]
+    stddevs = [p[1]['stddev'] for p in sorted_pfc]
     mins = [p[1]['min'] for p in sorted_pfc]
     maxs = [p[1]['max'] for p in sorted_pfc]
 
@@ -83,10 +88,10 @@ def plot_statistics(pfcs_info):
     plt.errorbar(means, y_pos, xerr=stddevs, fmt='none', ecolor='darkblue', elinewidth=1.5, capsize=5, label='Stddev')
 
     # Min points
-    plt.scatter(mins, y_pos, color='blue', marker='o', s=60, edgecolors='k', label='Min')
+    plt.scatter(mins, y_pos, color='blue', marker='x', s=100, label='Min')
 
     # Max points
-    plt.scatter(maxs, y_pos, color='red', marker='^', s=80, edgecolors='k', label='Max')
+    plt.scatter(maxs, y_pos, color='red', marker='x', s=100, label='Max')
 
     # Labels and formatting
     plt.yticks(y_pos, pfc_names)
@@ -97,7 +102,7 @@ def plot_statistics(pfcs_info):
     plt.tight_layout()
 
     plt.show()
-    plt.savefig("pfc_statistics.png", dpi=300, bbox_inches='tight')
+    plt.savefig(outfile, dpi=300, bbox_inches='tight')
     
 
 # For individual results analysis
@@ -105,11 +110,17 @@ if __name__ == "__main__":
     # ====================================================================================
     # Parse arguments
     parser = ArgumentParser(add_help=True)
-    parser.add_argument("-f",
-        "--results-file",
+    # parser.add_argument("-f",
+    #     "--results-file",
+    #     type=str,
+    #     required=True,
+    #     help="The results file to analyze.",
+    #    )
+    parser.add_argument("-t",
+         "--test",
         type=str,
         required=True,
-        help="The results file to analyze.",
+        help="The test to analyze.",
        )
     parser.add_argument("-c",
         "--core-id",
@@ -122,21 +133,23 @@ if __name__ == "__main__":
         action="store_true",
         help="Plot the statistics (if not specified, stats are printed).",
        )
+    
     args = parser.parse_args()
-    results_file = args.results_file
+    results_file = f"tmp/{args.test}.res"
+    testname = args.test
     core_id = args.core_id
     plot = args.plot
     # =====================================================================================
     # verify arguments
 
     if not os.path.exists(results_file):
-        print(f"Error: {results_file} does not exist.")
+        print(f"[Error] {results_file} does not exist.")
         exit(1)
     if not os.path.isfile(results_file):
-        print(f"Error: {results_file} is not a file.")
+        print(f"[Error] {results_file} is not a file.")
         exit(1)
     if core_id < 0 or core_id > 19:
-        print(f"Error: {core_id} is not a valid core ID.")
+        print(f"[Error] {core_id} is not a valid core ID.")
         exit(1)
     if core_id in range(0, 16):
         pfcs_names = pfcs_names_p
@@ -148,9 +161,8 @@ if __name__ == "__main__":
     
     pfcs_info = compute_statistics(results_file, core_id)
     if plot:
-        plot_statistics(pfcs_info)
+        plot_outfile = f"tmp/{testname}.png"
+        plot_statistics(pfcs_info, plot_outfile)
     else:
         for pfc_name in pfcs_info.keys():
-            temp = pfcs_info[pfc_name]['var']
-            pfcs_info[pfc_name]['var'] = math.sqrt(temp/(pfcs_info[pfc_name]['n'] - 1))
-            print(f"{pfc_name}:\n[\nAVG={pfcs_info[pfc_name]['mean']}\nSTDDEV={pfcs_info[pfc_name]['var']}\nMIN={pfcs_info[pfc_name]['min']}\nINPUTS={pfcs_info[pfc_name]['min_ind']}\nMAX={pfcs_info[pfc_name]['max']}\nINPUTS={pfcs_info[pfc_name]['max_ind']}\n]\n")
+            print(f"{pfc_name}:\n[\nAVG={pfcs_info[pfc_name]['mean']}\nVAR={pfcs_info[pfc_name]['var']}\nSTDDEV={pfcs_info[pfc_name]['stddev']}\nMIN={pfcs_info[pfc_name]['min']}\nINPUTS={pfcs_info[pfc_name]['min_ind']}\nMAX={pfcs_info[pfc_name]['max']}\nINPUTS={pfcs_info[pfc_name]['max_ind']}\n]\n")

@@ -267,7 +267,7 @@ def generate_mem_operand(spec: OperandSpec) -> Operand:
     # if spec.values:
     #     address_reg = random.choice(spec.values)
     # else:
-    #     address_reg = random.choice(memory_register_list[64])
+    address_reg = random.choice(memory_register_list[64])
 
     val = random.randint(0, pow(2, 12) - 1)
     if spec.width == 8:

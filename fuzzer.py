@@ -26,7 +26,7 @@ def run():
         default=30,
         help="Number of instructions per test case (can be larger due to alignment of mem-accesses).",)
     
-    parser.add_argument("-cpu",
+    parser.add_argument("-core",
         "--core-id",
         type=int,
         default=2,
@@ -41,32 +41,36 @@ def run():
     parser.add_argument("-s",
         "--seed",
         type=int,
-        default = 29348471,
+        default = 123456789,
         help="Seed for the inputs and test case generation.",)
 
     parser.add_argument("-conf",
         "--config-file",
         type=str,
-        default = "configs/cfg_AlderLakeP_common.txt",
+        default = "/home/doit_prj/proj/nanoBench/fuzzing/configs/cfg_AlderLakeP_common.txt",
         help="Seed for the inputs and test case generation.",)
 
     parser.add_argument("-i",
         "--instruction-spec",
         type=str,
-        default="fuzzing/utils/base.json",
+        default="/home/doit_prj/proj/nanoBench/fuzzing/utils/base.json",
         help="A JSON file which contains all the available instructions for this u-arch (see base.json).",)
     
     parser.add_argument("-f",
         "--instruction-filter",
         type=str,
-        default="fuzzing/utils/doits.txt",
+        default="/home/doit_prj/proj/nanoBench/fuzzing/utils/doits.txt",
         help="A text file which contains a list of allowed instructions (optional).",)
 
     parser.add_argument("-o",
         "--out-directory",
         type=str,
-        default="fuzzing/tmp",
+        default="/home/doit_prj/proj/nanoBench/fuzzing/tmp",
         help="The directory in which tests will be created.",)
+    parser.add_argument("-D",
+        "--debug",
+        action="store_true",
+        help="Debug mode.",)
     
     args = parser.parse_args()
     # ===================================================================================
@@ -79,6 +83,7 @@ def run():
     instruction_spec = InstructionSet(args.instruction_spec, filter)
     # ===================================================================================
     # Initialize test params
+    debug = args.debug
     num_test_cases = args.num_test_cases
     program_size = args.program_size
     core_id = args.core_id
@@ -107,10 +112,16 @@ def run():
     # ===================================================================================
     # Start fuzzing!
     for i in range(num_test_cases):
-        print(f"[{i+1}/{num_test_cases}] Running test case #{i}", end="\n")
+        print(f"[{i+1}/{num_test_cases}] Running test case #{i+1}", end="\n")
 
         # Generate random test code
         test_code = '"' + generate_test_case(program_size, mem_accesses, instruction_spec) + '"'
+
+        # # If Debug: save testcase
+        # if debug:
+        #     with open(f"tmp/test{i+1}.asm", "w") as f:
+        #         f.write(test_code[1:-1])
+
         # Try inputs
         num_inputs = 25
         for j in range(3):
@@ -119,7 +130,7 @@ def run():
             outfile = f"{outdir}/test{i+1}_{num_inputs}inputs.res"
             # print(f"sudo taskset -c {core_id} ./nanoBench.sh -f -unroll 100 -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
             try:
-                os.system(f"sudo taskset -c {core_id} ./nanoBench.sh -f -basic_mode -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
+                os.system(f"sudo taskset -c {core_id} ../nanoBench.sh -f -basic_mode -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
             except:
                 print(f"[ERROR] in test case {i}")
                 exit(1)
