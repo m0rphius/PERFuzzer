@@ -159,6 +159,7 @@ def run():
 
     # ===================================================================================
     # Start fuzzing!
+    print("Starting fuzzing...")
     num_inputs = 4
     with open('/sys/nb/inputs', 'wb') as file:
         for i in range(num_test_cases):
@@ -173,11 +174,11 @@ def run():
                     f.write(test_code[1:-1])
 
             total = len(sample_sizes)
-            tasks = [(f"[test {i+1}/{num_test_cases}, n_reps={n_reps}, num_inputs={num_inputs}]", 10 + 5 * min(j, total - j)) for (j, n_reps) in enumerate(sample_sizes)]
+            tasks = [(f"[test {i+1}/{num_test_cases}, n_reps={n_reps}, n_inputs={num_inputs}]", 10 + 5 * min(j, total - j)) for (j, n_reps) in enumerate(sample_sizes)]
 
             progress = 0
             total_work = sum(weight for _, weight in tasks)
-            pbar = tqdm(total=total_work, colour='green')
+            pbar = tqdm(total=total_work, colour="green")
 
             # Try inputs
             for (j, (desc, weight)) in enumerate(tasks):
@@ -202,7 +203,7 @@ def run():
                     exit(1)
                 progress += weight
                 pbar.update(weight)
-            num_inputs *= 2
+            # num_inputs *= 2
 
     pbar.close()
 
