@@ -1,11 +1,9 @@
 import os
-from argparse import ArgumentParser, ArgumentTypeError
-from typing import List
-import numpy as np
+from argparse import ArgumentParser
 import math
 from utils.utils import pfcs_names_p, pfcs_names_e
 import matplotlib.pyplot as plt
-import sys
+from tqdm import tqdm
 
 pfcs_names = []
 
@@ -24,7 +22,8 @@ def compute_statistics(results_filename : str, core_id : int = 0):
             if line == "\n" or line == "":
                 continue
             elif line.startswith("Input group"):
-                input_group = int(line[len("Input group "):]) # For mean and variance
+                after_num = line.find(':')
+                input_group = int(line[len("Input group "):after_num]) # For mean and variance
                 continue
             else: 
                 words = line.split()
@@ -70,7 +69,7 @@ def plot_statistics(pfcs_info, outfile):
 
     # Sort by mean
     sorted_pfc = sorted(pfcs_info.items(), key=lambda x: x[0], reverse=True)
-    sorted_pfc = [p for p in sorted_pfc if p[1]['mean'] > 0.0]
+    sorted_pfc = [p for p in sorted_pfc if p[1]['min'] != math.inf]
     pfc_names = [p[0] for p in sorted_pfc]
     means = [p[1]['mean'] for p in sorted_pfc]
     stddevs = [p[1]['stddev'] for p in sorted_pfc]
@@ -104,23 +103,73 @@ def plot_statistics(pfcs_info, outfile):
     plt.show()
     plt.savefig(outfile, dpi=300, bbox_inches='tight')
     
+def analyze_results(fuzz_dir : str=None, testfile : str=None, plot : bool=0, core_id : int=0):
+    if core_id < 0 or core_id > 19:
+        print(f"[Error] {core_id} is not a valid core ID.")
+        exit(1)
+    if core_id in range(0, 16):
+        pfcs_names = pfcs_names_p
+    else:
+        pfcs_names = pfcs_names_e
+
+    if fuzz_dir != None:
+        if not os.path.exists(fuzz_dir):
+            print(f"[Error] {fuzz_dir} does not exist.")
+            exit(1)
+        if not os.path.isdir(fuzz_dir):
+            print(f"[Error] {fuzz_dir} is not a directory.")
+            exit(1)
+    elif testfile != None:
+        if not os.path.exists(testfile):
+            print(f"[Error] {testfile} does not exist.")
+            exit(1)
+        if not os.path.isfile(testfile):
+            print(f"[Error] {testfile} is not a file.")
+            exit(1)
+    else:
+        print(f"[Error] no fuzz dir or results file provided!.")
+        exit(1)
+    
+    if fuzz_dir != None:
+        filenames = [s for s in os.listdir(fuzz_dir) if s.endswith('.res')]
+        for filename in tqdm(filenames, desc="Analyzing results"):
+            path = f"{fuzz_dir}/{filename}"
+            pfcs_info = compute_statistics(path, core_id)
+            if plot:
+                plot_outfile = f"{fuzz_dir}/{filename[:-4]}.png"
+                plot_statistics(pfcs_info, plot_outfile)
+            stats_outfile = f"{fuzz_dir}/{filename[:-4]}.stats"
+            pfcs = [pfc for pfc in pfcs_info.items() if pfc[1]['min'] != math.inf]
+            with open(stats_outfile, "w") as f:
+                for (name, desc) in pfcs:
+                    f.write(f"{name}:\n[\nAVG={desc['mean']}\nVAR={desc['var']}\nSTDDEV={desc['stddev']}\nMIN={desc['min']}\nINPUTS={desc['min_ind']}\nMAX={desc['max']}\nINPUTS={desc['max_ind']}\n]\n\n")
+    elif testfile != None:
+        pfcs_info = compute_statistics(testfile, core_id)
+        if plot:
+            plot_outfile = f"{testfile[:-4]}.png"
+            plot_statistics(pfcs_info, plot_outfile)
+        stats_outfile = f"{testfile[:-4]}.stats"
+        pfcs = [pfc for pfc in pfcs_info.items() if pfc[1]['min'] != math.inf]
+        with open(stats_outfile, "w") as f:
+            for (name, desc) in pfcs:
+                f.write(f"{name}:\n[\nAVG={desc['mean']}\nVAR={desc['var']}\nSTDDEV={desc['stddev']}\nMIN={desc['min']}\nINPUTS={desc['min_ind']}\nMAX={desc['max']}\nINPUTS={desc['max_ind']}\n]\n\n")
 
 # For individual results analysis
 if __name__ == "__main__":
     # ====================================================================================
     # Parse arguments
     parser = ArgumentParser(add_help=True)
-    # parser.add_argument("-f",
-    #     "--results-file",
-    #     type=str,
-    #     required=True,
-    #     help="The results file to analyze.",
-    #    )
-    parser.add_argument("-t",
-         "--test",
+    parser.add_argument("-d",
+         "--fuzz-dir",
         type=str,
-        required=True,
-        help="The test to analyze.",
+        required=False,
+        help="A fuzz directory to analyze.",
+       )
+    parser.add_argument("-t",
+         "--test-file",
+        type=str,
+        required=False,
+        help="A test results to analyze.",
        )
     parser.add_argument("-c",
         "--core-id",
@@ -135,34 +184,8 @@ if __name__ == "__main__":
        )
     
     args = parser.parse_args()
-    results_file = f"tmp/{args.test}.res"
-    testname = args.test
     core_id = args.core_id
     plot = args.plot
     # =====================================================================================
-    # verify arguments
-
-    if not os.path.exists(results_file):
-        print(f"[Error] {results_file} does not exist.")
-        exit(1)
-    if not os.path.isfile(results_file):
-        print(f"[Error] {results_file} is not a file.")
-        exit(1)
-    if core_id < 0 or core_id > 19:
-        print(f"[Error] {core_id} is not a valid core ID.")
-        exit(1)
-    if core_id in range(0, 16):
-        pfcs_names = pfcs_names_p
-    else:
-        pfcs_names = pfcs_names_e
-    
-    # =====================================================================================
-    # Compute statistics (plot if requested)
-    
-    pfcs_info = compute_statistics(results_file, core_id)
-    if plot:
-        plot_outfile = f"tmp/{testname}.png"
-        plot_statistics(pfcs_info, plot_outfile)
-    else:
-        for pfc_name in pfcs_info.keys():
-            print(f"{pfc_name}:\n[\nAVG={pfcs_info[pfc_name]['mean']}\nVAR={pfcs_info[pfc_name]['var']}\nSTDDEV={pfcs_info[pfc_name]['stddev']}\nMIN={pfcs_info[pfc_name]['min']}\nINPUTS={pfcs_info[pfc_name]['min_ind']}\nMAX={pfcs_info[pfc_name]['max']}\nINPUTS={pfcs_info[pfc_name]['max_ind']}\n]\n")
+    # analyze
+    analyze_results(args.fuzz_dir, args.test_file, plot)

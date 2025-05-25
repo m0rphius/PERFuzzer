@@ -1,16 +1,17 @@
-from argparse import ArgumentParser, ArgumentTypeError
+from argparse import ArgumentParser
+import pwd
+from time import time
 
 from matplotlib.pylab import rand
-import test
-from generator import InstructionSet, generate_test_case, register_allowlist, memory_register_list
+from generator import InstructionSet, generate_test_case, instruction_block_list
+from analyzer import analyze_results
 import os
 import random
-import mmap
-import subprocess
-import tempfile
-import ctypes
+import datetime
+from tqdm import tqdm
 
 def run():
+    cwd = os.getcwd()
     # ===================================================================================
     # Parse arguments
     parser = ArgumentParser(add_help=True)
@@ -47,40 +48,44 @@ def run():
     parser.add_argument("-conf",
         "--config-file",
         type=str,
-        default = "/home/doit_prj/proj/nanoBench/fuzzing/configs/cfg_AlderLakeP_common.txt",
-        help="Seed for the inputs and test case generation.",)
+        default=None,
+        help="Perfomance counters configuration file (format: '[EventSel].[UMask] [Name]').",)
 
     parser.add_argument("-i",
         "--instruction-spec",
         type=str,
-        default="/home/doit_prj/proj/nanoBench/fuzzing/utils/base.json",
+        default=f"{cwd}/utils/base.json",
         help="A JSON file which contains all the available instructions for this u-arch (see base.json).",)
     
     parser.add_argument("-f",
         "--instruction-filter",
         type=str,
-        default="/home/doit_prj/proj/nanoBench/fuzzing/utils/doits.txt",
+        default=f"{cwd}/utils/doits.txt",
         help="A text file which contains a list of allowed instructions (optional).",)
 
     parser.add_argument("-o",
         "--out-directory",
         type=str,
-        default="/home/doit_prj/proj/nanoBench/fuzzing/tmp",
+        default=f"{cwd}/results",
         help="The directory in which tests will be created.",)
     parser.add_argument("-D",
         "--debug",
         action="store_true",
         help="Debug mode.",)
+    parser.add_argument("-P",
+        "--plot",
+        action="store_true",
+        help="Plot results.",)
     
     args = parser.parse_args()
     # ===================================================================================
-
     # Initialize instruction set from the data base and filter
     filter = None
     with open(args.instruction_filter, "r") as f:
         filter = f.readlines()
         filter = [l[:-1] for l in filter] # Remove the unnecessary newline
     instruction_spec = InstructionSet(args.instruction_spec, filter)
+
     # ===================================================================================
     # Initialize test params
     debug = args.debug
@@ -88,26 +93,50 @@ def run():
     program_size = args.program_size
     core_id = args.core_id
     config = args.config_file
+    if core_id in range(0,16) and not config:
+        config = f"{cwd}/configs/cfg_AlderLakeP_common.txt"
+    elif not config:
+        config = f"{cwd}/configs/cfg_AlderLakeE_common.txt"
     mem_accesses = args.mem_accesses
     chosen_seed = args.seed
     random.seed(chosen_seed)
     if mem_accesses > (program_size / 2):
         mem_accesses = (program_size / 2)
-    outdir = args.out_directory
-    if not os.path.exists(outdir):
-        print("ERROR: {s} doesn't exist!".format(s=outdir))
+    if not os.path.exists(args.out_directory):
+        print(f"[ERROR] {args.out_directory} doesn't exist!")
         exit(1)
-    elif not os.path.isdir(outdir):
-        print("ERROR: {s} isn't a directory!".format(s=outdir))
+    elif not os.path.isdir(args.out_directory):
+        print(f"[ERROR] {args.out_directory} isn't a directory!")
         exit(1)
+    fuzz_id = f"fuzz{datetime.datetime.now().strftime('%Y-%d-%m-%H%M')}"
+    outdir = f"{args.out_directory}/{fuzz_id}"
+    try:
+        os.system(f"mkdir {outdir}")
+    except:
+        print(f"[ERROR] in making an out directory")
+        exit(1)
+    plot = args.plot
+
     # ===================================================================================
-    
+    # Print and store params
     print("\n" + "=" * 70)
     print("Params for fuzzer:\n")
-    print(f"num_test_cases={num_test_cases}\nprogram_size={program_size}\nmem_accesses={mem_accesses}\noutdir={outdir}\ncore_id={core_id}\nconfig={config}\ninstruction_filter={args.instruction_filter}\ninstruction_spec={args.instruction_spec} ({len(instruction_spec.instructions)} instructions after filtering)\n")
-    print(f"seed={chosen_seed}")
+    params = ""
+    params += f"seed={chosen_seed}\n"
+    params += f"num_test_cases={num_test_cases}\n"
+    params += f"program_size={program_size}\n"
+    params += f"mem_accesses={mem_accesses}\n"
+    params += f"outdir={outdir}\n"
+    params += f"core_id={core_id}\n"
+    params += f"config={config}\n"
+    params += f"instruction_filter={args.instruction_filter}\n"
+    params += f"instruction_spec={args.instruction_spec} ({len(instruction_spec.instructions)} instructions after filtering)\n"
+    print(params)
     print("=" * 70 + "\n")
-    print(f"Running {num_test_cases} test cases...\n")
+
+    # For reproducibility 
+    with open(f"{outdir}/fuzz.params", "w") as f:
+        f.write(params)
 
     # ===================================================================================
     # Start fuzzing!
@@ -116,30 +145,36 @@ def run():
 
         # Generate random test code
         test_code = '"' + generate_test_case(program_size, mem_accesses, instruction_spec) + '"'
-
+    
         # # If Debug: save testcase
-        # if debug:
-        #     with open(f"tmp/test{i+1}.asm", "w") as f:
-        #         f.write(test_code[1:-1])
+        if debug:
+            with open(f"{outdir}/test{i+1}.asm", "w") as f:
+                f.write(test_code[1:-1])
 
         # Try inputs
         num_inputs = 25
         for j in range(3):
             # Run nanoBench on test case with increasing number of inputs
-            print(f"Running with {num_inputs} inputs...")
+            print(f"Trying {num_inputs} input groups...")
             outfile = f"{outdir}/test{i+1}_{num_inputs}inputs.res"
-            # print(f"sudo taskset -c {core_id} ./nanoBench.sh -f -unroll 100 -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
+            # print(f"sudo taskset -c {core_id} ./nanoBench.sh -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
             try:
-                os.system(f"sudo taskset -c {core_id} ../nanoBench.sh -f -basic_mode -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
+                os.system(f"sudo taskset -c {core_id} ../kernel-nanoBench.sh -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
             except:
                 print(f"[ERROR] in test case {i}")
                 exit(1)
             num_inputs *= 2
 
     # ===================================================================================
+    # Analyze results
+    analyze_results(fuzz_dir=outdir, plot=plot, core_id=core_id)
+
+    # ===================================================================================
     # Done fuzzing
+
     print("\n" + "=" * 70)
     print("DONE FUZZING!\n")
+    print(f"Inspect results on {outdir}")
         
 if __name__ == "__main__":
     run()

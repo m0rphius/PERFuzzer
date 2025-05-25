@@ -11,20 +11,20 @@ from utils.utils import flatten
 
 
 register_allowlist = {
-    64 : ['rax', 'rbx', 'rcx', 'rdx', 'rdi', 'rsi'],
-    32 : ['eax', 'ebx', 'ecx', 'edx', 'edi', 'esi'],
-    16 : ['ax', 'bx', 'cx', 'dx', 'di', 'si'],
+    64 : ['rax', 'rbx', 'rcx', 'rdx'],
+    32 : ['eax', 'ebx', 'ecx', 'edx'],
+    16 : ['ax', 'bx', 'cx', 'dx'],
     8  : ['al',  'bl', 'cl', 'dl']
 }
 
 register_blocklist = {
-    64 : ['rbp', 'rsp', 'rip', 'r14', 'r15'],
-    32 : ['ebp', 'esp', 'eip', 'r14d', 'r15d'],
-    16 : ['bp', 'sp', 'ip', 'r14w','r15w'],
-    8 : ['bpl', 'spl', 'r14b','r15b', 'ah', 'bh', 'ch', 'dh'],
+    64 : ['rbp', 'rsp', 'rip', 'r14', 'r15', 'rdi', 'rsi'],
+    32 : ['ebp', 'esp', 'eip', 'r14d', 'r15d', 'edi', 'esi'],
+    16 : ['bp', 'sp', 'ip', 'r14w','r15w', 'di', 'si'],
+    8 : ['bpl', 'spl', 'r14b','r15b', 'ah', 'bh', 'ch', 'dh', 'sil', 'dil'],
     "other" : ["cr0", "cr2", "cr3", "cr4", "cr8",
                "dr0", "dr1", "dr2", "dr3", "dr4", "dr5", "dr6", "dr7",
-               "fs"]
+               "fs", "ss", "es", "gs", "ds"]
 }
 
 memory_register_list = {
@@ -34,6 +34,8 @@ memory_register_list = {
     8  : ['r8b', 'r9b', 'r10b', 'r11b', 'r12b', 'r13b']
 }
 base_register = "r14"
+
+instruction_block_list = []
 
 class OT(Enum):
     """Operand Type"""
@@ -194,14 +196,13 @@ class InstructionSet():
     def parse_operand(self, op: Dict, parent: InstructionSpec) -> OperandSpec:
         op_type = self.ot_str_to_enum[op["type_"]]
         op_values = op.get("values", [])
-        op_values2 = [val for val in op_values if not val in flatten(register_blocklist.values())]
+        op_values2 = [val for val in op_values if (not (val in flatten(register_blocklist.values()))) and
+                                                  (not ((val in flatten(memory_register_list.values())) and op['dest']))]
         if op_type == "REG":
             if op_values2 == []:
                 parent.has_empty_operand = True
             op_values2 = sorted(op_values2)
             
-        # if op_type == "MEM" and op_values2 != []:
-        #     print(op_values2)
         spec = OperandSpec(op_values2, op_type, op["src"], op["dest"])
         spec.width = op["width"]
         spec.signed = op.get("signed", False)
@@ -257,27 +258,25 @@ class InstructionSet():
 def generate_reg_operand(spec: OperandSpec) -> Operand:
         choices = []
         if spec.values:
-            choices = [val for val in spec.values if (not val in flatten(register_blocklist.values()))]
+            choices = [val for val in spec.values if (not (val in flatten(register_blocklist.values()))) and (not (val in flatten(memory_register_list.values()) and spec.dest))]
         else:
             choices = register_allowlist[spec.width]
 
         return random.choice(choices)
 
 def generate_mem_operand(spec: OperandSpec) -> Operand:
-    # if spec.values:
-    #     address_reg = random.choice(spec.values)
-    # else:
+
     address_reg = random.choice(memory_register_list[64])
 
     val = random.randint(0, pow(2, 12) - 1)
     if spec.width == 8:
-        op = "byte ptr [{base} + {offset}]".format(base=base_register, offset=val)
+        op = "byte ptr [{base} + {offset}]".format(base=base_register, offset=address_reg)
     elif spec.width == 16:
-        op = "word ptr [{base} + {offset}]".format(base=base_register,  offset=val)
+        op = "word ptr [{base} + {offset}]".format(base=base_register,  offset=address_reg)
     elif spec.width == 32:
-        op = "dword ptr [{base} + {offset}]".format(base=base_register,  offset=val)
+        op = "dword ptr [{base} + {offset}]".format(base=base_register,  offset=address_reg)
     elif spec.width == 64:
-        op = "qword ptr [{base} + {offset}]".format(base=base_register,  offset=val)
+        op = "qword ptr [{base} + {offset}]".format(base=base_register,  offset=address_reg)
     return op
 
 def generate_imm_operand(spec: OperandSpec) -> Operand:
@@ -287,17 +286,6 @@ def generate_imm_operand(spec: OperandSpec) -> Operand:
         # make it random
         value = str(pow(2, spec.width) - 2)
         return value
-
-    # generate from a predefined range
-    # if spec.values:
-    #     assert "[" in spec.values[0], spec.values
-    #     range_ = spec.values[0][1:-1].split("-")
-    #     if range_[0] == "":
-    #         range_ = range_[1:]
-    #         range_[0] = "-" + range_[0]
-    #     assert len(range_) == 2
-    #     value = str(random.randint(int(range_[0]), int(range_[1])))
-    #     ImmediateOperand(value, spec.width)
 
     # generate from width
     if spec.signed:
@@ -330,23 +318,6 @@ def generate_agen_operand(spec: OperandSpec) -> Operand:
 
 def generate_test_case(program_size : int, mem_accesses : int, instruction_spec : InstructionSet):
     # ===================================================================================
-    # print(len(instruction_spec.instructions))
-
-    # Crate an output file
-    # print(f"[{i+1}/{num_test_cases}] Generating test case #{i} ==> ", end="")
-    # try:
-    #     os.system(f"mkdir {outdir}/test{i+1} 2> /dev/null")
-    # except:
-    #     print(f"[ERROR] Couldn't create a directory for test {i+1}!")
-    #     exit(1)
-    # test_filename = f"{outdir}/test{i+1}/test{i+1}.asm"
-
-    # # Fill the file 
-    # with open(test_filename, "w+") as f:
-    #     # General headers
-    #     f.write(".intel_syntax noprefix\n")
-    #     f.write(".global _start\n")
-    #     f.write("_start:\n")
 
     # choose "mem_accesses" instructions that will access memory
     inst_indices = list(range(program_size))
@@ -365,32 +336,25 @@ def generate_test_case(program_size : int, mem_accesses : int, instruction_spec 
         inst += inst_desc.name + " "
         num_operands = len(inst_desc.operands)
         operand_indices = list(range(num_operands))
-        # if inst_desc.name == "test":
-        #     print([operand.values for operand in inst_desc.operands if operand.type==OT.REG])
 
         # SPECIAL CASE: BASE-STRINGOP implicitly accesses mem and needs alignment
         if inst_desc.category == "BASE-STRINGOP":
-            code += "lea rsi, [r14]\n"
-            code += "lea rdi, [r14 + 4096]\n"
             if inst_desc.name.startswith('rep'):
                 align_mask = 0xFF  # at most 255 repetitions
                 code += f"and rcx, {align_mask}\n"
-
         for (op, ind) in zip(inst_desc.operands, operand_indices):
             op_str = ""
             if op.type == OT.REG:
                 op_str = generate_reg_operand(op)
-                # SPECIAL CASE: if BT, BTC, BTS, BTR need to align the operand
-                if op.src and inst_desc.name.startswith('bt'):
-                    align_mask = 0xFF  # at most 16 bits are kept
-                    align_inst = f"and {op_str}, {align_mask}\n"
+                # SPECIAL CASE: if BT, BTC, BTS, BTR need to align the offset operand
+                if op.src and ind != 0 and inst_desc.name.startswith('bt'):
+                    align_mask = 0xF  # use only lower nibble
+                    align_inst = f"and {op_str}, {hex(align_mask)}\n"
                     code += align_inst
             elif op.type == OT.MEM:
                 op_str = generate_mem_operand(op)
             elif op.type == OT.IMM:
                 op_str = generate_imm_operand(op)
-            # elif op.type == OT.FLAGS:
-            #     op_str = generate_mem_operand(op)
             elif op.type == OT.AGEN:
                 op_str = generate_agen_operand(op)
             inst += op_str + ", "
@@ -400,21 +364,6 @@ def generate_test_case(program_size : int, mem_accesses : int, instruction_spec 
             inst = inst[:-1] + "\n"
         code += inst
     return code   
-
-        # print(f"Assembling {test_filename} ==> ", end="")
-        # try:
-        #     os.system(" as -o {obj_file} {asm_file}".format(asm_file=test_filename, obj_file=test_filename[:-4]+".o"))
-        # except:
-        #     print("[ERROR]", "Couldn't assemble {asm_file}!".format(asm_file=test_filename))
-        #     exit(1)
-        
-        # print(f"Creating {test_filename[:-4]+".bin"} ==> ", end="")
-        # try:
-        #     os.system("ld --oformat binary -o {bin_file} {obj_file}".format(obj_file=test_filename[:-4]+".o", bin_file=test_filename[:-4]+".bin"))
-        # except:
-        #     print("[ERROR]", "Couldn't convert {asm_file}!".format(asm_file=test_filename))
-        #     exit(1)
-        # print("Success")
 
 if __name__ == "__main__":
     print("[ERROR]", "This file is not meant to be run directly. Use `fuzzer.py` instead.")
