@@ -1,14 +1,31 @@
 from argparse import ArgumentParser
-import pwd
-from time import time
 
-from matplotlib.pylab import rand
-from generator import InstructionSet, generate_test_case, instruction_block_list
+from generator import InstructionSet, generate_test_case
 from analyzer import analyze_results
 import os
 import random
 import datetime
+import numpy as np
+import tqdm
 from tqdm import tqdm
+
+NUM_CHANGING_REGS = 4 # (rax, rbx, rcx, rdx)
+NUM_CONSTANT_REGS = 6 # (r8, r9, r10, r11, r12, r13)
+
+def _write_inputs(inputs : np.ndarray[np.int32]):
+    
+    # with open('/sys/nb/inputs', 'rb') as f:
+    #     data = f.read()
+    #     print(f"Raw bytes {data}")
+    #     print(f"As hex: {data.hex()}")
+    #     print(f"Length: {len(data)} bytes")
+
+    #     n_reps = int(inputs.shape[0])
+    #     n_inputs = int(inputs.shape[1])
+    #     for i in range(n_reps):
+    #         for j in range(n_inputs):
+    #             print(f"Input {i, j}={data.hex()[i * (n_inputs * 8) + j * 8: i * (n_inputs * 8) + (j + 1) * 8]}")
+    pass
 
 def run():
     cwd = os.getcwd()
@@ -100,6 +117,7 @@ def run():
     mem_accesses = args.mem_accesses
     chosen_seed = args.seed
     random.seed(chosen_seed)
+    np.random.seed(chosen_seed)
     if mem_accesses > (program_size / 2):
         mem_accesses = (program_size / 2)
     if not os.path.exists(args.out_directory):
@@ -116,6 +134,7 @@ def run():
         print(f"[ERROR] in making an out directory")
         exit(1)
     plot = args.plot
+    sample_sizes = [10, 25, 50, 100]
 
     # ===================================================================================
     # Print and store params
@@ -140,34 +159,56 @@ def run():
 
     # ===================================================================================
     # Start fuzzing!
-    for i in range(num_test_cases):
-        print(f"[{i+1}/{num_test_cases}] Running test case #{i+1}", end="\n")
+    num_inputs = 4
+    with open('/sys/nb/inputs', 'wb') as file:
+        for i in range(num_test_cases):
+            # print(f"[{i+1}/{num_test_cases}] Running test case #{i+1}", end="\n")
 
-        # Generate random test code
-        test_code = '"' + generate_test_case(program_size, mem_accesses, instruction_spec) + '"'
-    
-        # # If Debug: save testcase
-        if debug:
-            with open(f"{outdir}/test{i+1}.asm", "w") as f:
-                f.write(test_code[1:-1])
+            # Generate random test code
+            test_code = '"' + generate_test_case(program_size, mem_accesses, instruction_spec) + '"'
 
-        # Try inputs
-        num_inputs = 25
-        for j in range(3):
-            # Run nanoBench on test case with increasing number of inputs
-            print(f"Trying {num_inputs} input groups...")
-            outfile = f"{outdir}/test{i+1}_{num_inputs}inputs.res"
-            # print(f"sudo taskset -c {core_id} ./nanoBench.sh -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
-            try:
-                os.system(f"sudo taskset -c {core_id} ../kernel-nanoBench.sh -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
-            except:
-                print(f"[ERROR] in test case {i}")
-                exit(1)
+            # # If Debug: save testcase
+            if debug:
+                with open(f"{outdir}/test{i+1}.asm", "w") as f:
+                    f.write(test_code[1:-1])
+
+            total = len(sample_sizes)
+            tasks = [(f"[test {i+1}/{num_test_cases}, n_reps={n_reps}, num_inputs={num_inputs}]", 10 + 5 * min(j, total - j)) for (j, n_reps) in enumerate(sample_sizes)]
+
+            progress = 0
+            total_work = sum(weight for _, weight in tasks)
+            pbar = tqdm(total=total_work, colour='green')
+
+            # Try inputs
+            for (j, (desc, weight)) in enumerate(tasks):
+                pbar.set_description_str(desc)
+                n_reps = sample_sizes[j]
+                # Inputs that don't change between input groups
+                constant_inputs = np.random.randint(low=0, high=(2**12) - 1, size=NUM_CONSTANT_REGS, dtype=np.int32)
+                # Inputs that vary between input groups
+                inputs = np.random.randint(low=0, high=(2**31), size=(n_reps, num_inputs * NUM_CHANGING_REGS), dtype=np.int32)
+                # transfer to KM
+                file.write(constant_inputs.tobytes())
+                file.write(inputs.flatten().tobytes())
+
+                outfile = f"{outdir}/test{i+1}_nreps{n_reps}.res"
+
+                # Run nanoBench on test case with increasing number of inputs
+                # print(f"sudo taskset -c {core_id} ./nanoBench.sh -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
+                try:
+                    os.system(f"sudo taskset -c {core_id} ../kernel-nanoBench.sh -config {config} -n_reps {n_reps} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
+                except:
+                    print(f"[ERROR] in test case {i}")
+                    exit(1)
+                progress += weight
+                pbar.update(weight)
             num_inputs *= 2
+
+    pbar.close()
 
     # ===================================================================================
     # Analyze results
-    analyze_results(fuzz_dir=outdir, plot=plot, core_id=core_id)
+    # analyze_results(fuzz_dir=outdir, plot=plot, core_id=core_id)
 
     # ===================================================================================
     # Done fuzzing

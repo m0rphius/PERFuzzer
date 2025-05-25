@@ -1,14 +1,9 @@
 import json
 from typing import Dict, List
-from copy import deepcopy
 from enum import Enum
-from argparse import ArgumentParser, ArgumentTypeError
-import os
 import random
-from abc import ABC, abstractmethod
-from unicodedata import category
+from abc import ABC
 from utils.utils import flatten
-
 
 register_allowlist = {
     64 : ['rax', 'rbx', 'rcx', 'rdx'],
