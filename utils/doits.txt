@@ -231,12 +231,6 @@ punpcklqdq
 punpcklwd
 push
 pxor
-rep movsb
-rep movsd
-rep movsw
-rep stosb
-rep stosd
-rep stosw
 sar
 sbb
 setb

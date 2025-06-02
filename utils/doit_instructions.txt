@@ -376,12 +376,12 @@ PUSH	 0x68
 PUSH	 0x6a
 PUSH	 0xff
 PXOR	 0xef
-REP_MOVSB1	 0xa4
-REP_MOVSD1	 0xa5
-REP_MOVSW1	 0xa5
-REP_STOSB1	 0xaa
-REP_STOSD1	 0xab
-REP_STOSW1	 0xab
+#REP_MOVSB1	 0xa4   # REP instructions can cause speculation (violates SIC and SIR)
+#REP_MOVSD1	 0xa5
+#REP_MOVSW1	 0xa5
+#REP_STOSB1	 0xaa
+#REP_STOSD1	 0xab
+#REP_STOSW1	 0xab   
 SAR	 0xc0
 SAR	 0xc1
 SAR	 0xd0

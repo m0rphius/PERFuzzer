@@ -1,31 +1,30 @@
 from argparse import ArgumentParser
 
+import subprocess
+from sys import byteorder
 from generator import InstructionSet, generate_test_case
-from analyzer import analyze_results
+from analyzer import analyze_results_str
 import os
 import random
 import datetime
 import numpy as np
 import tqdm
 from tqdm import tqdm
+import time
 
 NUM_CHANGING_REGS = 4 # (rax, rbx, rcx, rdx)
 NUM_CONSTANT_REGS = 6 # (r8, r9, r10, r11, r12, r13)
 
-def _write_inputs(inputs : np.ndarray[np.int32]):
-    
-    # with open('/sys/nb/inputs', 'rb') as f:
-    #     data = f.read()
-    #     print(f"Raw bytes {data}")
-    #     print(f"As hex: {data.hex()}")
-    #     print(f"Length: {len(data)} bytes")
+def __write_inputs(constant_inputs : np.ndarray[int], inputs : np.ndarray[int]):
+    with open("/sys/nb/inputs", "wb") as f:
+        f.write(constant_inputs.tobytes())
+        f.write(inputs.flatten().tobytes())
 
-    #     n_reps = int(inputs.shape[0])
-    #     n_inputs = int(inputs.shape[1])
-    #     for i in range(n_reps):
-    #         for j in range(n_inputs):
-    #             print(f"Input {i, j}={data.hex()[i * (n_inputs * 8) + j * 8: i * (n_inputs * 8) + (j + 1) * 8]}")
-    pass
+def __write_testcase(testcase : str):
+    subprocess.run(f"sudo ../initKernelNBParams.sh -asm {testcase}",shell=True, check=True)
+
+def __initialize_experiment(num_inputs : int, config : str, seed : int):
+    subprocess.run(f"sudo ../initKernelNBParams.sh -num_inputs {num_inputs} -config {config} -seed {seed}",shell=True, check=True)
 
 def run():
     cwd = os.getcwd()
@@ -61,6 +60,12 @@ def run():
         type=int,
         default = 123456789,
         help="Seed for the inputs and test case generation.",)
+    
+    parser.add_argument("-t",
+        "--violation-threshold",
+        type=float,
+        default = 1.0,
+        help="A threshold for deciding when a counter difference is a violation.",)
 
     parser.add_argument("-conf",
         "--config-file",
@@ -118,6 +123,7 @@ def run():
     chosen_seed = args.seed
     random.seed(chosen_seed)
     np.random.seed(chosen_seed)
+    violation_threshold = args.violation_threshold
     if mem_accesses > (program_size / 2):
         mem_accesses = (program_size / 2)
     if not os.path.exists(args.out_directory):
@@ -139,6 +145,7 @@ def run():
     # ===================================================================================
     # Print and store params
     print("\n" + "=" * 70)
+
     print("Params for fuzzer:\n")
     params = ""
     params += f"seed={chosen_seed}\n"
@@ -159,57 +166,70 @@ def run():
 
     # ===================================================================================
     # Start fuzzing!
-    print("Starting fuzzing...")
-    num_inputs = 4
-    with open('/sys/nb/inputs', 'wb') as file:
-        for i in range(num_test_cases):
-            # print(f"[{i+1}/{num_test_cases}] Running test case #{i+1}", end="\n")
+    print("Start fuzzing...")
+    num_inputs = 10
 
-            # Generate random test code
-            test_code = '"' + generate_test_case(program_size, mem_accesses, instruction_spec) + '"'
+    for i in range(num_test_cases):
+        # Generate random test code
+        test_code = '"' + generate_test_case(program_size, mem_accesses, instruction_spec) + '"'
+        
+        # # If Debug: save testcase
+        if debug:
+            with open(f"{outdir}/test{i+1}.asm", "w") as f:
+                f.write(test_code[1:-1])
 
-            # # If Debug: save testcase
-            if debug:
-                with open(f"{outdir}/test{i+1}.asm", "w") as f:
-                    f.write(test_code[1:-1])
+        # TODO: write testcase binary into /sys/nb/run_code
+        __write_testcase(test_code)
 
-            total = len(sample_sizes)
-            tasks = [(f"[test {i+1}/{num_test_cases}, n_reps={n_reps}, n_inputs={num_inputs}]", 10 + 5 * min(j, total - j)) for (j, n_reps) in enumerate(sample_sizes)]
+        total = len(sample_sizes)
+        tasks = [(f"[test {i+1}/{num_test_cases}, n_reps={n_reps}, n_inputs={num_inputs}]", 10 + 5 * min(j, total - j)) for (j, n_reps) in enumerate(sample_sizes)]
 
-            progress = 0
-            total_work = sum(weight for _, weight in tasks)
-            pbar = tqdm(total=total_work, colour="green")
+        progress = 0
+        total_work = sum(weight for _, weight in tasks)
+        pbar = tqdm(total=total_work, colour="green")
 
-            # Try inputs
-            for (j, (desc, weight)) in enumerate(tasks):
-                pbar.set_description_str(desc)
-                n_reps = sample_sizes[j]
-                # Inputs that don't change between input groups
-                constant_inputs = np.random.randint(low=0, high=(2**12) - 1, size=NUM_CONSTANT_REGS, dtype=np.int32)
-                # Inputs that vary between input groups
-                inputs = np.random.randint(low=0, high=(2**31), size=(n_reps, num_inputs * NUM_CHANGING_REGS), dtype=np.int32)
-                # transfer to KM
-                file.write(constant_inputs.tobytes())
-                file.write(inputs.flatten().tobytes())
+        # Try inputs
+        for (j, (desc, weight)) in enumerate(tasks):
+            pbar.set_description_str(desc)
+            n_reps = sample_sizes[j]
+            # Inputs that don't change between input groups
+            constant_inputs = np.random.randint(low=0, high=(2**12) - 1, size=NUM_CONSTANT_REGS, dtype=np.int32)
+            # Inputs that do change
+            inputs = np.random.randint(low=0, high=(2**31), size=(n_reps, num_inputs * NUM_CHANGING_REGS), dtype=np.int32)
+            # transfer to KM
+            __write_inputs(constant_inputs, inputs)
 
-                outfile = f"{outdir}/test{i+1}_nreps{n_reps}.res"
 
-                # Run nanoBench on test case with increasing number of inputs
-                # print(f"sudo taskset -c {core_id} ./nanoBench.sh -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
+            # Run nanoBench on test case with increasing number of inputs
+            # print(f"sudo taskset -c {core_id} ./nanoBench.sh -config {config} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
+            __initialize_experiment(num_inputs, config, chosen_seed)
+            output = ""
+            for rep in range(n_reps):
+                # Init general experiment params
                 try:
-                    os.system(f"sudo taskset -c {core_id} ../kernel-nanoBench.sh -config {config} -n_reps {n_reps} -num_inputs {num_inputs} -seed {chosen_seed} -asm {test_code} > {outfile}")
+                    # Run the test case and collect trace  
+                    output += subprocess.check_output(f"taskset -c {core_id} sudo cat /sys/nb/measurements",
+                                                        shell=True,
+                                                        stderr=subprocess.STDOUT).decode('utf-8')
                 except:
-                    print(f"[ERROR] in test case {i}")
+                    print(f"[ERROR] in running test case {i}")
                     exit(1)
-                progress += weight
-                pbar.update(weight)
-            # num_inputs *= 2
+
+                
+                # violations = analyze_results_str(output=output, n_reps = n_reps, n_inputs=num_inputs, violation_threshold=violation_threshold)
+                # if violations != "":
+                #     tqdm.write(f"[n_reps={n_reps}]\n{violations}")
+
+            progress += weight
+            pbar.update(weight)
+            
+            if debug:
+                    outfile = f"{outdir}/test{i+1}_{n_reps}nreps.res"
+                    with open(outfile, "w") as o:
+                        o.write(output)
+                
 
     pbar.close()
-
-    # ===================================================================================
-    # Analyze results
-    # analyze_results(fuzz_dir=outdir, plot=plot, core_id=core_id)
 
     # ===================================================================================
     # Done fuzzing

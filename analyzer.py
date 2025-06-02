@@ -1,14 +1,85 @@
+from itertools import combinations
 import os
 from argparse import ArgumentParser
 import math
+from sre_constants import ASSERT
 from utils.utils import pfcs_names_p, pfcs_names_e
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from typing import List, Tuple
+import numpy as np
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
 
 pfcs_names = []
 
+def _compute_diff_histogram(output : str, n_inputs : int) -> Tuple[np.ndarray[np.float32], List[Tuple]]:
+    # Prepare histogram: each element represents a pair (Ii,Ij) of 2 inputs
+    # and contains a list of counters of size <n_pfc_configs>, which counts differences in each counter.
+    results = [l for l in output.split('\n') if l.startswith("[")]
+    results_by_reps = []
+    rep_list = []
+    for i in range(len(results)):
+        # Start a new rep list
+        if i != 0 and i % n_inputs == 0:
+            results_by_reps.append(rep_list)
+            rep_list = []
+        rep_list.append([float(n) for n in results[i].split()[1:]])
+    
+    # Continue with numpy for efficiency
+    x = np.array(results_by_reps, dtype=np.float32)
+    B, H, W = x.shape
+    pairs = list(combinations(range(H), 2)) # Note: pairs are sorted in lex-order.  
+    # will contain the differences
+    diffs = np.empty((B, len(pairs), W), dtype=np.float32)
+    
+    for idx, (i, j) in enumerate(pairs):
+        diffs[:, idx, :] = x[:, i, :] - x[:, j, :]
+    diffs = np.round(np.abs(diffs), 2)
+    
+    return diffs, pairs
+
+
+def analyze_results_str(output : str = None, n_reps : int = 0, n_inputs : int = 0, violation_threshold : float = 0.0):
+
+    if output == None:
+        print(f"[Error] no output provided!.")
+        exit(1)
+
+    # Get configs
+    with open("/sys/nb/config", "r") as f:
+        configs = [l.split()[1] for l in f.readlines()]
+
+    n_pfc_configs = len(configs)
+
+    diffs, pairs = _compute_diff_histogram(output, n_inputs)
+    H = len(pairs)
+    W = n_pfc_configs
+    x = np.empty((H, W))
+
+    final = ""
+    for i in range(H):
+        x[i] = np.sum(diffs[:, i, :] > violation_threshold, axis=0)
+        violations = np.argwhere(x[i])
+        if violations.size != 0:
+            for ind in violations:
+                ind = ind.item()
+                final += f"{pairs[i]} {x[i][ind]} {configs[ind]}\n"
+    return final
+    # Search for violations
+
+
 # Parse a test<i>_<j>inputs.res file and compute statistics for each counter
-def compute_statistics(results_filename : str, core_id : int = 0):
+def _compute_statistics(results_filename : str, core_id : int = 0):
     if core_id in range(0,16):
         pfcs_names = pfcs_names_p
     else:
@@ -65,7 +136,7 @@ def compute_statistics(results_filename : str, core_id : int = 0):
     return pfcs_info
 
 # Plot the statistics
-def plot_statistics(pfcs_info, outfile):
+def _plot_statistics(pfcs_info, outfile):
 
     # Sort by mean
     sorted_pfc = sorted(pfcs_info.items(), key=lambda x: x[0], reverse=True)
@@ -102,8 +173,8 @@ def plot_statistics(pfcs_info, outfile):
 
     plt.show()
     plt.savefig(outfile, dpi=300, bbox_inches='tight')
-    
-def analyze_results(fuzz_dir : str=None, testfile : str=None, plot : bool=0, core_id : int=0):
+
+def analyze_results_dir(fuzz_dir : str=None, testfile : str=None, plot : bool=0, core_id : int=0):
     if core_id < 0 or core_id > 19:
         print(f"[Error] {core_id} is not a valid core ID.")
         exit(1)
@@ -134,20 +205,20 @@ def analyze_results(fuzz_dir : str=None, testfile : str=None, plot : bool=0, cor
         filenames = [s for s in os.listdir(fuzz_dir) if s.endswith('.res')]
         for filename in tqdm(filenames, desc="Analyzing results"):
             path = f"{fuzz_dir}/{filename}"
-            pfcs_info = compute_statistics(path, core_id)
+            pfcs_info = _compute_statistics(path, core_id)
             if plot:
                 plot_outfile = f"{fuzz_dir}/{filename[:-4]}.png"
-                plot_statistics(pfcs_info, plot_outfile)
+                _plot_statistics(pfcs_info, plot_outfile)
             stats_outfile = f"{fuzz_dir}/{filename[:-4]}.stats"
             pfcs = [pfc for pfc in pfcs_info.items() if pfc[1]['min'] != math.inf]
             with open(stats_outfile, "w") as f:
                 for (name, desc) in pfcs:
                     f.write(f"{name}:\n[\nAVG={desc['mean']}\nVAR={desc['var']}\nSTDDEV={desc['stddev']}\nMIN={desc['min']}\nINPUTS={desc['min_ind']}\nMAX={desc['max']}\nINPUTS={desc['max_ind']}\n]\n\n")
     elif testfile != None:
-        pfcs_info = compute_statistics(testfile, core_id)
+        pfcs_info = _compute_statistics(testfile, core_id)
         if plot:
             plot_outfile = f"{testfile[:-4]}.png"
-            plot_statistics(pfcs_info, plot_outfile)
+            _plot_statistics(pfcs_info, plot_outfile)
         stats_outfile = f"{testfile[:-4]}.stats"
         pfcs = [pfc for pfc in pfcs_info.items() if pfc[1]['min'] != math.inf]
         with open(stats_outfile, "w") as f:
@@ -188,4 +259,4 @@ if __name__ == "__main__":
     plot = args.plot
     # =====================================================================================
     # analyze
-    analyze_results(args.fuzz_dir, args.test_file, plot)
+    analyze_results_dir(args.fuzz_dir, args.test_file, plot)
