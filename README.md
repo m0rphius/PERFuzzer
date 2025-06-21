@@ -152,7 +152,9 @@ Adding the _-debug_ flag logs important information about the fuzz which can lat
   Core ID         : 16
   Output Dir      : <root/results>
 ```
-Notice that some parameters have default values, for all the default values see the definition of the **FuzzerConfig** class inside **fuzzer.py**.
+Notice that some parameters have default values,
+
+for all the full list see **FuzzerConfig** inside **fuzzer.py**.
 
 2. The generated tests themselves can be viewed in _results/<fuzz_timestamp>_/test<num_test>.asm
    
