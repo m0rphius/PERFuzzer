@@ -1,7 +1,7 @@
 # PERFuzzer
 
 **PERFuzzer** is a hardware-oriented instruction fuzzer designed to explore subtle behaviors in CPU microarchitecture using performance counters.  
-Built on top of a custom kernel module called **FuzzBench** (a fork of nanoBench), it automates the generation, execution, and analysis of randomized instruction sequences to detect timing anomalies and microarchitectural side effects.
+Built on top of a custom kernel module called **FuzzBench** (a fork of nanoBench), it automates the generation, execution, and analysis of randomized instruction sequences to detect timing anomalies and microarchitectural side effects. The generation of random testcases and communication between the fuzzer and kernel module, is inspired by Microsoft's **Revizor**, which is also a fuzzer that searches for microarchitectural leaks in CPUs 
 
 ---
 
@@ -17,21 +17,23 @@ Built on top of a custom kernel module called **FuzzBench** (a fork of nanoBench
 
 ## Architecture
 
-PERFuzzer/
-│
-├── FuzzBench/ # Kernel module (submodule based on nanoBench)
-│ └── FuzzBench_km.c
-│
-├── fuzzer.py # Main CLI for fuzzing
-├── generator.py # Instruction generator from ISA spec
-├── analyzer.py # Detects violations based on counter deviation
-├── utils.py # Input encoding and test invocation
-│
-├── configs/ # Counter and MSR configurations (txt)
-├── utils/ # Instruction specs and filters
-│ ├── base.json 
-│
-└── results/ # (optional) Logs, ASM, measurements
+```text
+  PERFuzzer/
+  │
+  ├── FuzzBench/ # Kernel module (submodule based on nanoBench)
+  │ └── FuzzBench_km.c
+  │
+  ├── fuzzer.py # Main CLI for fuzzing
+  ├── generator.py # Instruction generator from ISA spec
+  ├── analyzer.py # Detects violations based on counter deviation
+  ├── utils.py # Input encoding and test invocation
+  │
+  ├── configs/ # Counter and MSR configurations (txt)
+  ├── utils/ # Instruction specs and filters
+  │ ├── base.json 
+  │
+  └── results/ # (optional) Logs, ASM, measurements
+```
 
 ## Installation 
 
@@ -69,12 +71,67 @@ measurement traces which look like the following:
   [n_reps,n_inputs] <counter_1 value> ... <counter_n value>
 ```
 Then, the traces are passed to **analyzer.py** which analyzes the measurements and tries to find "violations". 
-In this context, a "violation" is a five-tuple (Ii,Ij,c)_,dt,df_ where:
+In this context, a "violation" is a five-tuple _(Ii,Ij,C,dt,df)_ where:
  - _Ii,Ij_ are input indices (e.g 0 and 2)
- - _c_ is a specific counter
- - _dt_ is a value in [0,1] which determines 
-which differ in measurement by some minimal threshold, 
+ - _C_ is a specific counter 
+ - _dt_ is a value in [0,1] which determines what is the minimal **difference** in percentages between _Ii_'s and _Ij_'s measurements of _C_, that is considered "interesting" (=not ignored).
+ - _df_ is a value in [0,1] which determines the minimal **frequency** in which an "interesting" difference must occur, to not be ignored by **analyzer.py**.
+In short, a violation is 2 inputs which frequently differ in some counter, by a meaningful amount.
 
+If **analyzer.py** finds violations, they are all declared and the fuzzing stops. 
+If no violations were found, the fuzzer continues for the next testacse. 
+
+Reported violations look like the following: 
+```text
+  [V]:(0, 1) | CPU_CLK_UNHALTED.THREAD_P | 1.0
+  [V]:(0, 2) | CPU_CLK_UNHALTED.THREAD_P | 1.0
+  [V]:(0, 3) | CPU_CLK_UNHALTED.THREAD_P | 1.0
+  [V]:(0, 4) | CPU_CLK_UNHALTED.THREAD_P | 1.0
+  [V]:(0, 5) | CPU_CLK_UNHALTED.THREAD_P | 1.0
+  [V]:(0, 6) | CPU_CLK_UNHALTED.THREAD_P | 1.0
+  [V]:(0, 7) | CPU_CLK_UNHALTED.THREAD_P | 1.0
+  [V]:(0, 8) | CPU_CLK_UNHALTED.THREAD_P | 1.0
+  [V]:(0, 9) | CPU_CLK_UNHALTED.THREAD_P | 1.0
+  [V]:(0, 1) | ARITH.DIV_ACTIVE | 1.0
+  [V]:(0, 2) | ARITH.DIV_ACTIVE | 1.0
+  [V]:(0, 3) | ARITH.DIV_ACTIVE | 1.0
+  [V]:(0, 4) | ARITH.DIV_ACTIVE | 1.0
+  [V]:(0, 5) | ARITH.DIV_ACTIVE | 1.0
+  [V]:(0, 6) | ARITH.DIV_ACTIVE | 1.0
+  [V]:(0, 7) | ARITH.DIV_ACTIVE | 1.0
+  [V]:(0, 8) | ARITH.DIV_ACTIVE | 1.0
+  [V]:(0, 9) | ARITH.DIV_ACTIVE | 1.0
+```
+In this case, the test included a **DIV** instruction which has a variable-latency.
+As we can see, the 1st input achieved a consistently different cycle count and 
+cycles during which the divide unit is active, which are counted by
+CPU_CLK_UNHALTED.THREAD_P and ARITH.DIV_ACTIVE respectively. 
+
+This teaches us that this input induces a significantly slower / faster flow than 
+inputs 1-9. 
+
+### Useful Flags
+| Argument                  | Type     | Default              | Description                                               |
+|---------------------------|----------|----------------------|-----------------------------------------------------------|
+| `-n`, `--num-test-cases`  | `int`    | `10`                 | Number of test cases to generate                          |
+| `-p`, `--program-size`    | `int`    | `30`                 | Number of instructions per test case                      |
+| `-core`, `--core-id`      | `int`    | `2`                  | Logical ID of the core that will run the tests            |
+| `-m`, `--mem-accesses`    | `int`    | `10`                 | Number of memory accesses per test case                   |
+| `-S`, `--scale-factor`    | `float`  | `1.1`                | Scale of parameters growth between test cases             |
+| `-dt`, `--diff-threshold` | `float`  | `0.5`                | Difference threshold for the analyzer                     |
+| `-ft`, `--freq-threshold` | `float`  | `0.5`                | Frequency threshold for the analyzer                      |
+| `-s`, `--seed`            | `int`    | `123456789`          | Seed for random generation                                |
+| `-w`, `--warmup-count`    | `int`    | `1`                  | Number of warmup rounds before each experiment            |
+| `-a`, `--aggregate-func`  | `str`    | `"avg"`              | Aggregation function: `avg`, `min`, `max`, or `median`    |
+| `-conf`, `--config-file`  | `str`    | `None`               | Path to performance counters configuration file           |
+| `-i`, `--instruction-spec`| `str`    | `utils/base.json`    | JSON file with instruction definitions                    |
+| `-f`, `--instruction-filter` | `str` | `utils/doits.txt`    | Text file listing allowed instructions                    |
+| `-o`, `--out-directory`   | `str`    | `results/`           | Directory for saving test output                          |
+| `-D`, `--debug`           | `flag`   | `False`              | Enable debug mode (stores all test artifacts)             |
+| `-P`, `--plot`            | `flag`   | `False`              | Enable plotting of results                                |
+
+### Logging and Reproducibility 
+Adding the _-debug_ flag logs important information about the fuzz which can later be used to reproduce the results:
 1. The configuration of the fuzz can be viewed in _results/<fuzz_timestamp>_/fuzz.params:
 ```text
   Fuzzer Configuration:
@@ -93,13 +150,10 @@ which differ in measurement by some minimal threshold,
   Core ID         : 16
   Output Dir      : <root/results>
 ```
-This is useful for reproducing results from a previous fuzz. 
 Notice that some parameters have default values, for all the default values see the definition of the **FuzzerConfig** class inside **fuzzer.py**.
-2. The tests themselves can be viewed in _results/<fuzz_timestamp>_/test<num_test>.asm
-3. The PFC measurements for each test can also be viewed in _results/<fuzz_timestamp>_/test<num_test>_<n_reps>reps.res
-which look like the following: 
+2. The generated tests themselves can be viewed in _results/<fuzz_timestamp>_/test<num_test>.asm
+3. The PFC measurements for each test can also be viewed in _results/<fuzz_timestamp>_/test<num_test>_<n_reps>reps.res 
 
-where **n_reps** and **n_inputs** are the number of times we repeat each test and the number of random inputs for each test, respectively. 
 
 
 
