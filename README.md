@@ -6,7 +6,7 @@ Built on top of a custom kernel module called **FuzzBench** (a fork of nanoBench
 ---
 
 ## Disclaimers
-1. This tool executes arbitrary code in kernel space. Use on with cuation, on isolated machines.
+1. This tool executes arbitrary code in kernel space. Use with cuation, on isolated machines.
    
 2. Root access is required.
 
