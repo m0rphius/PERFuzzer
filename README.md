@@ -86,7 +86,7 @@ In this context, a "violation" is a five-tuple _(Ii,Ij,C,dt,df)_ where:
  - _dt_ is a value in [0,1] which determines what is the minimal **difference** in percentages between _Ii_'s and _Ij_'s measurements of _C_, that is considered "interesting" (=not ignored).
  - _df_ is a value in [0,1] which determines the minimal **frequency** in which an "interesting" difference must occur, to not be ignored by **analyzer.py**.
    
-In short, a violation is 2 inputs which frequently differ in some counter, by a meaningful amount.
+In essence, a violation is 2 inputs which frequently differ in some counter, by a meaningful amount.
 
 If **analyzer.py** finds violations, they are all declared and the fuzzing stops. 
 If no violations were found, the fuzzer continues for the next testacse. 
