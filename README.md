@@ -5,6 +5,15 @@ Built on top of a custom kernel module called **FuzzBench** (a fork of nanoBench
 
 ---
 
+## Disclaimers
+1. This tool executes arbitrary code in kernel space. Use on with cuation, on isolated machines.
+   
+2. Root access is required.
+
+3. Before using the fuzzer you must know your architecture, since counter configurations are architecture-dependent.
+If you have a hybrid architecture, then you must know the architecture for each core, and provide a compatible counter config (explained later).
+The correctness and stability of the fuzzer isn't guaranteed when using wrong configurations. 
+
 ## Highlights
 
 - Performance-counter-driven fuzzing
