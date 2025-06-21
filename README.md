@@ -24,7 +24,7 @@ The correctness and stability of the fuzzer isn't guaranteed when using wrong co
 
 ---
 
-## Architecture
+## Structure
 
 ```text
   PERFuzzer/
