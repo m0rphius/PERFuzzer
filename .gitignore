@@ -1,0 +1,17 @@
+# Catch all's
+*.cmd
+*.o
+*.o.ur-safe
+*.mod
+*.dwo
+*.pyc
+*.html
+*.xml
+*.asm
+*.s
+*.tar.gz
+.vscode
+
+# Ignore __pycache__ directories
+__pycache__/
+# Ignore Python bytecode files
