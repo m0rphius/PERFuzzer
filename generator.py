@@ -3,7 +3,6 @@ from typing import Dict, List
 from enum import Enum
 import random
 from abc import ABC
-from utils.utils import flatten
 
 register_allowlist = {
     64 : ['rax', 'rbx', 'rcx', 'rdx'],
@@ -191,8 +190,10 @@ class InstructionSet():
     def parse_operand(self, op: Dict, parent: InstructionSpec) -> OperandSpec:
         op_type = self.ot_str_to_enum[op["type_"]]
         op_values = op.get("values", [])
-        op_values2 = [val for val in op_values if (not (val in flatten(register_blocklist.values()))) and
-                                                  (not ((val in flatten(memory_register_list.values())) and op['dest']))]
+        flat_register_blocklist = [x for xs in register_blocklist.values() for x in xs]
+        flat_memory_register_list = [x for xs in memory_register_list.values() for x in xs]
+        op_values2 = [val for val in op_values if (not (val in flat_register_blocklist)) and
+                                                  not ((val in flat_memory_register_list and op['dest']))]
         if op_type == "REG":
             if op_values2 == []:
                 parent.has_empty_operand = True
@@ -252,8 +253,10 @@ class InstructionSet():
 
 def generate_reg_operand(spec: OperandSpec) -> Operand:
         choices = []
+        flat_register_blocklist = [x for xs in register_blocklist.values() for x in xs]
+        flat_memory_register_list = [x for xs in memory_register_list.values() for x in xs]
         if spec.values:
-            choices = [val for val in spec.values if (not (val in flatten(register_blocklist.values()))) and (not (val in flatten(memory_register_list.values()) and spec.dest))]
+            choices = [val for val in spec.values if (not (val in flat_register_blocklist)) and (not (val in flat_memory_register_list and spec.dest))]
         else:
             choices = register_allowlist[spec.width]
 
