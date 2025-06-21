@@ -1,0 +1,3 @@
+[submodule "FuzzBench"]
+	path = FuzzBench
+	url = https://github.com/YonatanRozen/FuzzBench.git
