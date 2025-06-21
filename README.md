@@ -19,7 +19,7 @@ The correctness and stability of the fuzzer isn't guaranteed when using wrong co
 - Performance-counter-driven fuzzing
 - Systematic exploration of instruction interactions
 - Kernel module for accurate in-core measurements
-- Input-controlled microbenchmarking (RAX, RBX, RCX, RDX)
+- Input-controlled microbenchmarking
 - Scalable fuzzing with dynamic test generation and thresholds
 
 ---
