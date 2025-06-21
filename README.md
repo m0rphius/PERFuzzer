@@ -112,7 +112,7 @@ Reported violations look like the following:
   [V]:(0, 8) | ARITH.DIV_ACTIVE | 1.0
   [V]:(0, 9) | ARITH.DIV_ACTIVE | 1.0
 ```
-The 2 numbers at the beginning of each line, are the input IDs which produced the violation. Then, we have the counter in which a differenve occured and lastly, the fraction of repetitions in which both inputs had a meaningful relative difference (above the threshold __df__). 
+The 2 numbers at the beginning of each line are the input IDs which produced the violation. Then, we have the counter in which a difference occured and lastly, the fraction of repetitions in which both inputs had a meaningful relative difference (above the threshold __df__). 
 
 In this case, the test included a **DIV** instruction which has a variable-latency.
 
