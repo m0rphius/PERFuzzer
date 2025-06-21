@@ -104,6 +104,7 @@ Reported violations look like the following:
   [V]:(0, 9) | ARITH.DIV_ACTIVE | 1.0
 ```
 In this case, the test included a **DIV** instruction which has a variable-latency.
+
 As we can see, the 1st input achieved a consistently different cycle count and 
 cycles during which the divide unit is active, which are counted by
 CPU_CLK_UNHALTED.THREAD_P and ARITH.DIV_ACTIVE respectively. 
@@ -152,7 +153,9 @@ Adding the _-debug_ flag logs important information about the fuzz which can lat
   Output Dir      : <root/results>
 ```
 Notice that some parameters have default values, for all the default values see the definition of the **FuzzerConfig** class inside **fuzzer.py**.
+
 2. The generated tests themselves can be viewed in _results/<fuzz_timestamp>_/test<num_test>.asm
+   
 3. The PFC measurements for each test can also be viewed in _results/<fuzz_timestamp>_/test<num_test>_<n_reps>reps.res 
 
 
