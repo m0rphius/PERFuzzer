@@ -1,7 +1,7 @@
 # PERFuzzer
 
 **PERFuzzer** is a hardware-oriented instruction fuzzer designed to explore subtle behaviors in CPU microarchitecture using performance counters.  
-Built on top of a custom kernel module called **FuzzBench** (a fork of nanoBench), it automates the generation, execution, and analysis of randomized instruction sequences to detect timing anomalies and microarchitectural side effects. The generation of random testcases and communication between the fuzzer and kernel module, is inspired by Microsoft's **Revizor**, which is also a fuzzer that searches for microarchitectural leaks in CPUs 
+Built on top of a custom kernel module called **FuzzerBench** (a fork of nanoBench), it automates the generation, execution, and analysis of randomized instruction sequences to detect timing anomalies and microarchitectural side effects. The generation of random testcases and communication between the fuzzer and kernel module, is inspired by Microsoft's **Revizor**, which is also a fuzzer that searches for microarchitectural leaks in CPUs 
 
 ---
 
@@ -29,8 +29,8 @@ The correctness and stability of the fuzzer isn't guaranteed when using wrong co
 ```text
   PERFuzzer/
   │
-  ├── FuzzBench/ # Kernel module (submodule based on nanoBench)
-  │ └── FuzzBench_km.c
+  ├── FuzzerBench/ # Kernel module (submodule based on nanoBench)
+  │ └── FuzzerBench_km.c
   │
   ├── fuzzer.py # Main CLI for fuzzing
   ├── generator.py # Instruction generator from ISA spec
@@ -56,9 +56,10 @@ git submodule update --init --recursive
 ```
 ### 2. Build and insert the kernel module
 ```bash
-cd FuzzBench
-make
-sudo insmod FuzzBench.ko
+cd FuzzerBench
+cd kernel
+make 
+sudo insmod FuzzerBench.ko
 ```
 
 ## Using the fuzzer
