@@ -13,12 +13,6 @@ from dataclasses import dataclass, field
 from tqdm import tqdm
 
 from generator import InstructionSet, generate_test_case
-from utils import (
-    write_inputs, 
-    initialize_experiment, 
-    NUM_CHANGING_REGS, 
-    NUM_CONSTANT_REGS, 
-)
 
 @dataclass
 class FuzzerConfig:
@@ -31,7 +25,6 @@ class FuzzerConfig:
     difference_threshold : float = 0.5
     frequency_threshold : float = 0.5
     seed: int = 123456789
-    num_measurements: int = 1
     warmup_count: int = 1
     aggregate_func: str = "avg"
     config_file: Optional[str] = None
@@ -67,11 +60,6 @@ class FuzzerConfig:
         if self.core_id in range(0, 16):
             return "configs/cfg_AlderLakeP_common.txt"
         return "configs/cfg_AlderLakeE_common.txt"
-
-# @dataclass
-# class ExperimentConfig: 
-#     """Configuration of an experiment"""
-#     n_reps : int 
 
 class FuzzerError(Exception):
     """Custom exception for fuzzer errors"""
@@ -135,7 +123,6 @@ Scale Factor    : {scale_factor}
 Diff. Threshold : {difference_threshold}
 Freq. Threshold : {frequency_threshold}
 Seed            : {seed}
-Measurements    : {num_measurements}
 Warmup Count    : {warmup_count}
 Config File     : {config_file}
 Core ID         : {core_id}{output_dir}
@@ -152,26 +139,16 @@ Core ID         : {core_id}{output_dir}
             difference_threshold=config.difference_threshold,
             frequency_threshold=config.frequency_threshold,
             seed=config.seed,
-            num_measurements=config.num_measurements,
             warmup_count=config.warmup_count,
             config_file=config.config_file,
             core_id=config.core_id,
             output_dir=f"\nOutput Dir      : {self.path}" if config.debug else ""
-        )
+        )    
 
-
-# @dataclass
-# class Input: 
-#     """An input to a testcase"""
-#     id : int
-#     values : List[int]
-
-#     def __post_init__(self):
-#         if self.id < 0: 
-#             raise ValueError(f"{self.id} is not a valid input ID!")
-#         if len(self.values) != NUM_CHANGING_REGS: 
-#             raise ValueError(f"provided too little \\ too many inputs!")       
-
+@dataclass
+class VarInput:
+    id : int
+    values : List[int]
 
 class TestCaseRunner:
     """Handles execution of individual test cases"""
@@ -179,11 +156,18 @@ class TestCaseRunner:
     def __init__(self, config: FuzzerConfig, output_manager: OutputManager):
         self.config = config
         self.output_dir = output_manager
-        self.n_inputs = 10
-        self.n_reps = 50
+        self.n_inputs = 100
+        self.n_reps = 15
     
     def run_test_case(self, test_number: int, test_code: str) -> str:
         """Run a single test case and return results"""
+
+        from utils import (
+            write_inputs, 
+            initialize_experiment,
+            NUM_CHANGING_REGS
+        )
+
         formatted_code = f'"{test_code}"'
         # formatted_code = f'"or rcx, 1\nand rdx, rcx\nshr rdx, 1\ndiv rcx"'
 
@@ -194,18 +178,12 @@ class TestCaseRunner:
         initialize_experiment(testcase=formatted_code)
         
         # Generate inputs
-        constant_inputs, variable_inputs = self._generate_inputs()
+        constant_inputs, variable_inputs = self.__generate_inputs()
 
         # Specifically for DIV
-        # for i in range(self.n_reps):
-        #     variable_inputs[i * (self.config.warmup_count + self.n_inputs) * NUM_CHANGING_REGS +
-        #                     self.config.warmup_count * NUM_CHANGING_REGS] = 0x04000000
-        #     variable_inputs[i * (self.config.warmup_count + self.n_inputs) * NUM_CHANGING_REGS +
-        #                     self.config.warmup_count * NUM_CHANGING_REGS + 1] = 0x0
-        #     variable_inputs[i * (self.config.warmup_count + self.n_inputs) * NUM_CHANGING_REGS +
-        #                     self.config.warmup_count * NUM_CHANGING_REGS + 2] = 0x02000000
-        #     variable_inputs[i * (self.config.warmup_count + self.n_inputs) * NUM_CHANGING_REGS +
-        #                     self.config.warmup_count * NUM_CHANGING_REGS + 3] = 0x01000000
+        # print(len(variable_inputs))
+        for i in range(self.n_reps):
+            variable_inputs[i * (self.config.warmup_count + self.n_inputs) + self.config.warmup_count].values = [0x04000000, 0x0, 0x02000000, 0x01000000]
 
         write_inputs(constant_inputs, variable_inputs)
         
@@ -215,7 +193,6 @@ class TestCaseRunner:
             num_inputs=self.n_inputs,
             seed=self.config.seed,
             cpu=self.config.core_id,
-            num_measurements=self.config.num_measurements,
             aggregate_func=self.config.aggregate_func,
             warmup_count=self.config.warmup_count
         )
@@ -227,19 +204,28 @@ class TestCaseRunner:
             self.output_dir.save_results(test_number, self.n_reps, output)
         
         
-        return output
+        return output, (constant_inputs, variable_inputs)
     
-    def _generate_inputs(self) -> Tuple[List[int], List[List[int]]]:
+    def __generate_inputs(self) -> Tuple[List[int], List[VarInput]]:
         """Generate constant and variable inputs for the test"""
-        constant_inputs = [
-            random.randint(0, (2**13) - 1) 
-            for _ in range(NUM_CONSTANT_REGS)
-        ]
+
+        from utils import(
+            NUM_CHANGING_REGS,
+            NUM_CONSTANT_REGS
+        )
+
+        constant_inputs = [random.randint(0, (2**13) - 1) for _ in range(NUM_CONSTANT_REGS)]
+            
         
-        variable_inputs = [
-            random.randint(0, (2**31) - 1) 
-            for _ in range(self.n_reps * ((self.config.warmup_count + self.n_inputs) * NUM_CHANGING_REGS))
+        # Variable inputs are duplicated for all reps
+        variable_inputs_temp = [
+            VarInput(id=i-self.config.warmup_count, values=[random.randint(0, (2**31) - 1) for _ in range(NUM_CHANGING_REGS)])
+            for i in range(self.config.warmup_count + self.n_inputs)
         ]
+
+        variable_inputs = []
+        for _ in range(self.n_reps):
+            variable_inputs += variable_inputs_temp
         
         return constant_inputs, variable_inputs
     
@@ -251,7 +237,7 @@ class TestCaseRunner:
         
         output = ""
         
-        with open("/sys/nb/trace", 'rb') as trace:
+        with open("/sys/FuzzerBench/trace", 'rb') as trace:
             with tqdm(total=self.n_reps, desc=desc, colour="green") as pbar:
                 for rep in range(self.n_reps):
                     try:
@@ -318,11 +304,17 @@ class CPUFuzzer:
             )
             
             try:
-                output = self.test_runner.run_test_case(i + 1, test_code)
-                # TODO: Add violation analysis here
-                # violations = self._analyze_violations(output, ...)
-                self.analyzer.analyze(output, self.config, self.test_runner.n_reps, self.test_runner.n_inputs)
+                output, inputs = self.test_runner.run_test_case(i + 1, test_code)
 
+                # Violation analysis
+                violations = self.analyzer.analyze(output, 
+                                                   test_code,
+                                                   inputs, 
+                                                   self.config, 
+                                                   self.test_runner.n_reps, 
+                                                   self.test_runner.n_inputs)
+                if violations > 0:
+                    break
                 # Scale parameters for next iteration
                 self.test_runner._scale_parameters()
             except FuzzerError as e:
@@ -359,8 +351,6 @@ def create_argument_parser() -> ArgumentParser:
                        help="Frequency threshold for the analyser.")
     parser.add_argument("-s", "--seed", type=int, default=123456789,
                        help="Seed for random generation")
-    parser.add_argument("-N", "--num-measurements", type=int, default=1,
-                       help="Number of measurements for each test case")
     parser.add_argument("-w", "--warmup-count", type=int, default=1,
                        help="Number of warmup rounds before each experiment")
     parser.add_argument("-a", "--aggregate-func", type=str, default="avg",
@@ -401,7 +391,6 @@ def main():
             difference_threshold=args.diff_threshold,
             frequency_threshold=args.freq_threshold,
             seed=args.seed,
-            num_measurements=args.num_measurements,
             warmup_count=args.warmup_count,
             aggregate_func=args.aggregate_func,
             config_file=args.config_file,
