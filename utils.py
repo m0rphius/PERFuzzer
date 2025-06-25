@@ -46,4 +46,6 @@ def initialize_experiment(testcase : str = None, num_inputs : int = None, config
         params += f"-cpu {cpu} "
     if aggregate_func: 
         params += f"-{aggregate_func} "
+    params += f" -unroll 1 "
+    params += f" -basic_mode "
     subprocess.run(f"sudo FuzzerBench/init_params.sh {params}",shell=True, check=True)

@@ -10,35 +10,51 @@ from pathlib import Path
 from typing import List, Tuple, Optional
 from dataclasses import dataclass, field
 
-from tqdm import tqdm
+from tqdm import tqdm, TqdmWarning
+import warnings
+warnings.filterwarnings("ignore", category=TqdmWarning, module="tqdm")
 
 from generator import InstructionSet, generate_test_case
+from colors import (
+    generate_distinct_colors, 
+    colorize_text_lines
+)
 
 @dataclass
 class FuzzerConfig:
     """Configuration parameters for the fuzzer"""
-    num_test_cases: int = 10
+    template: Optional[str] = None
+    num_fuzzing_rounds: int = 10
     program_size: int = 30
     core_id: int = 2
     mem_accesses: int = 10
     scale_factor : float = 1.1
     difference_threshold : float = 0.5
     frequency_threshold : float = 0.5
+    stat_threshold : float = 0.5
+    outliers_threshold : float = 0.2
     seed: int = 123456789
     warmup_count: int = 1
-    aggregate_func: str = "avg"
+    aggregate_func: Optional[str] = "avg"
+    analyzer_type: Optional[str] = "threshold"
     config_file: Optional[str] = None
     counter_ids : List[int] = field(default_factory=list)
     n_counters : int = 0
     instruction_spec: str = ""
     instruction_filter: str = ""
+    instruction_count : int = 0     # Internal
     out_directory: str = ""
     debug: bool = False
     plot: bool = False
+    color : bool = False
 
     def __post_init__(self):
         """Validate configuration after initialization"""
-        if self.mem_accesses > (self.program_size // 2):
+        if self.template:
+            if not os.path.exists(self.template) or not os.path.isfile(self.template):
+                raise ValueError(f"{self.template} is not a legal source name")
+
+        if not self.template and self.mem_accesses > (self.program_size // 2):
             self.mem_accesses = self.program_size // 2
             
         if self.aggregate_func not in ["avg", "min", "max", "median"]:
@@ -93,9 +109,9 @@ class OutputManager:
         
         return outdir
     
-    def save_params(self, config: FuzzerConfig, instruction_count: int):
+    def save_params(self, config: FuzzerConfig):
         """Save fuzzer parameters to file"""
-        params = self._format_params(config, instruction_count)
+        params = self._format_params(config)
         params_file = self.path / "fuzz.params"
         params_file.write_text(params)
     
@@ -109,10 +125,50 @@ class OutputManager:
         result_file = self.path / f"test{test_number}_{n_reps}nreps.res"
         result_file.write_text(output)
     
-    def _format_params(self, config: FuzzerConfig, instruction_count: int) -> str:
+    def save_results_colored(self, test_number: int, n_reps: int, output: str, colors):
+        lines = output.splitlines()
+        html_lines = []
+
+        for i, line in enumerate(lines):
+            color = colors[i % len(colors)]
+            html_lines.append(f'<div style="color:{color}; margin:0">{line}</div>')
+
+        full_html = "<html><body style='font-family:monospace;'>\n" + "\n".join(html_lines) + "\n</body></html>"
+        
+        filename = self.path / f"test{test_number}_{n_reps}nreps_colored.html"
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(full_html)
+
+    
+    def _format_params(self, config: FuzzerConfig) -> str:
         """Format parameters for printing and saving"""
-        template = """
-Fuzzer Configuration:
+        if config.analyzer_type == "threshold":
+            analyzer_str = f"threshold [dt={config.difference_threshold} df={config.frequency_threshold}]"
+        elif config.analyzer_type == "chi":
+            analyzer_str = f"chi [st={config.stat_threshold} ot={config.outliers_threshold}]"
+
+        if config.template:
+            template = """
+    Template Fuzzing
+
+    Template      : {template_asm}
+    Scale Factor    : {scale_factor}
+    Analyzer        : {analyzer_str}
+    Seed            : {seed}
+    Warmup Count    : {warmup_count}
+    Config File     : {config_file}
+    Core ID         : {core_id}{output_dir}
+            """.format(template_asm=config.template,
+            scale_factor=config.scale_factor,
+            analyzer_str=analyzer_str,
+            seed=config.seed,
+            warmup_count=config.warmup_count,
+            config_file=config.config_file,
+            core_id=config.core_id,
+            output_dir=f"\nOutput Dir      : {self.path}" if config.debug else "")
+        else:
+            template = """
+Regular Fuzzing:
 
 Test Cases      : {num_test_cases}
 Instructions    : {instruction_count} loaded from {instruction_spec}
@@ -120,30 +176,26 @@ Filter          : {instruction_filter}
 Program Size    : {program_size}
 Memory Accesses : {mem_accesses}
 Scale Factor    : {scale_factor}
-Diff. Threshold : {difference_threshold}
-Freq. Threshold : {frequency_threshold}
+Analyzer        : {analyzer_str}
 Seed            : {seed}
 Warmup Count    : {warmup_count}
 Config File     : {config_file}
 Core ID         : {core_id}{output_dir}
-        """
-        
-        return template.format(
-            num_test_cases=config.num_test_cases,
-            instruction_count=instruction_count,
+            """.format(num_test_cases=config.num_fuzzing_rounds,
+            instruction_count=config.instruction_count,
             instruction_spec=config.instruction_spec,
             instruction_filter=config.instruction_filter,
             program_size=config.program_size,
             mem_accesses=config.mem_accesses,
             scale_factor=config.scale_factor,
-            difference_threshold=config.difference_threshold,
-            frequency_threshold=config.frequency_threshold,
+            analyzer_str=analyzer_str,
             seed=config.seed,
             warmup_count=config.warmup_count,
             config_file=config.config_file,
             core_id=config.core_id,
-            output_dir=f"\nOutput Dir      : {self.path}" if config.debug else ""
-        )    
+            output_dir=f"\nOutput Dir      : {self.path}" if config.debug else "")
+        
+        return template
 
 @dataclass
 class VarInput:
@@ -155,9 +207,9 @@ class TestCaseRunner:
     
     def __init__(self, config: FuzzerConfig, output_manager: OutputManager):
         self.config = config
-        self.output_dir = output_manager
-        self.n_inputs = 100
-        self.n_reps = 15
+        self.output_manager = output_manager
+        self.n_inputs = 5
+        self.n_reps = 50
     
     def run_test_case(self, test_number: int, test_code: str) -> str:
         """Run a single test case and return results"""
@@ -172,7 +224,7 @@ class TestCaseRunner:
         # formatted_code = f'"or rcx, 1\nand rdx, rcx\nshr rdx, 1\ndiv rcx"'
 
         if self.config.debug:
-            self.output_dir.save_test_case(test_number, test_code)
+            self.output_manager.save_test_case(test_number, test_code)
         
         # Initialize experiment
         initialize_experiment(testcase=formatted_code)
@@ -201,7 +253,10 @@ class TestCaseRunner:
         output = self._run_experiment_with_progress(test_number)
         
         if self.config.debug:
-            self.output_dir.save_results(test_number, self.n_reps, output)
+            if self.config.color:
+                self.output_manager.save_results_colored(test_number, self.n_reps, output,
+                                                          generate_distinct_colors(self.n_inputs))
+            self.output_manager.save_results(test_number, self.n_reps, output)
         
         
         return output, (constant_inputs, variable_inputs)
@@ -231,22 +286,21 @@ class TestCaseRunner:
     
     def _run_experiment_with_progress(self, test_number: int) -> str:
         """Run experiment with progress bar"""
-        desc = (f"[test {test_number}/{self.config.num_test_cases}, "
+        desc = (f"[test {test_number}/{self.config.num_fuzzing_rounds}, "
                 f"nr={self.n_reps}, ni={self.n_inputs}, "
                 f"p={self.config.program_size}, m={self.config.mem_accesses}]")
         
         output = ""
         
         with open("/sys/FuzzerBench/trace", 'rb') as trace:
-            with tqdm(total=self.n_reps, desc=desc, colour="green") as pbar:
-                for rep in range(self.n_reps):
-                    try:
-                        output += trace.read().decode('utf-8')
-                        trace.seek(0)
-                    except Exception as e:
-                        raise FuzzerError(f"Error reading measurements: {e}")
+            print(f"Running {desc}")
+            for rep in range(self.n_reps):
+                try:
+                    output += trace.read().decode('utf-8')
+                    trace.seek(0)
+                except Exception as e:
+                    raise FuzzerError(f"Error reading measurements: {e}")
                     
-                    pbar.update(1)
         
         return output
     
@@ -263,13 +317,17 @@ class CPUFuzzer:
     """Main fuzzer class that orchestrates the fuzzing process"""
     
     def __init__(self, config: FuzzerConfig):
-        from analyzer import Analyzer
+        from analyzer import ThresholdAnalyzer, ChiAnalyzer
         self.config = config
         self.output_manager = OutputManager(config.out_directory) if config.debug else OutputManager()
         self.instruction_set = self._load_instruction_set()
+        self.config.instruction_count = len(self.instruction_set.instructions)
         self.test_runner = TestCaseRunner(config, self.output_manager)
-        self.analyzer = Analyzer(difference_threshold=config.difference_threshold,
+        if self.config.analyzer_type == "threshold":
+            self.analyzer = ThresholdAnalyzer(difference_threshold=config.difference_threshold,
                                  frequency_threshold=config.frequency_threshold)
+        elif self.config.analyzer_type == "chi":
+            self.analyzer = ChiAnalyzer(self.config.stat_threshold, self.config.outliers_threshold)
         # Set random seed
         random.seed(config.seed)
     
@@ -282,21 +340,41 @@ class CPUFuzzer:
                 filter_instructions = [line.strip() for line in f.readlines()]
         
         return InstructionSet(self.config.instruction_spec, filter_instructions)
-    
+
     def run(self):
+        """"
+        Entry point when starting the fuzzer 
+        
+        if provided template => template fuzz
+        else => regular fuzz
+
+        """
+        
+        if self.config.template:
+            try: 
+                with open(self.config.template, "r") as f:
+                    test_code = f.read()
+            except:
+                print(f"[ERROR] fuzzer: error while reading / opening template file")
+
+            self.__template_fuzz(test_code) 
+        else:
+            self.__fuzz()
+
+    def __fuzz(self):
+        """Regular fuzz - works on randomly generated test cases"""
         from analyzer import AnalyzerError
-        """Main fuzzing loop"""
         sep = "="*140
         
-        print(self.output_manager._format_params(self.config, len(self.instruction_set.instructions)))
+        print(self.output_manager._format_params(self.config))
         print(sep)
 
         if self.config.debug:
-            self.output_manager.save_params(self.config, len(self.instruction_set.instructions))
+            self.output_manager.save_params(self.config)
         
         print("Start fuzzing...")
         
-        for i in range(self.config.num_test_cases):
+        for i in range(self.config.num_fuzzing_rounds):
             test_code = generate_test_case(
                 self.config.program_size,
                 self.config.mem_accesses,
@@ -329,14 +407,54 @@ class CPUFuzzer:
         if self.config.debug:
             print(f"Inspect results in {self.output_manager.path}")
 
+    def __template_fuzz(self, test_code : str):
+        """Template fuzz - works on a predefined test case"""
+
+        from analyzer import AnalyzerError
+        sep = "="*140
+        
+        print(self.output_manager._format_params(self.config))
+        print(sep)
+
+        if self.config.debug:
+            self.output_manager.save_params(self.config)
+        
+        print("Start fuzzing...")
+        
+        for i in range(self.config.num_fuzzing_rounds):
+            
+            try:
+                output, inputs = self.test_runner.run_test_case(i + 1, test_code)
+
+                # Violation analysis
+                violations = self.analyzer.analyze(output, 
+                                                   test_code,
+                                                   inputs, 
+                                                   self.config, 
+                                                   self.test_runner.n_reps, 
+                                                   self.test_runner.n_inputs)
+                if violations > 0:
+                    break
+                # Scale parameters for next iteration
+                self.test_runner._scale_parameters()
+            except FuzzerError as e:
+                print(f"[ERROR] fuzzer: {e}")
+                return
+            except AnalyzerError as e:
+                print(f"[ERROR] analyzer: {e}")
+                return
+
 
 def create_argument_parser() -> ArgumentParser:
     """Create and configure argument parser"""
     cwd = os.getcwd()
-    parser = ArgumentParser(description="CPU Fuzzer - Generate and execute CPU test cases")
+    parser = ArgumentParser()
     
-    parser.add_argument("-n", "--num-test-cases", type=int, default=10,
-                       help="Number of test cases to generate")
+    parser.add_argument("-t", "--template", type=str,
+                       help="Provide an asm template to the fuzzer in INTEL syntax" \
+                       " (if provided all regular fuzzing parameters are ignored)")
+    parser.add_argument("-n", "--num-fuzzing-rounds", type=int, default=10,
+                       help="Number of fuzzing rounds")
     parser.add_argument("-p", "--program-size", type=int, default=30,
                        help="Number of instructions per test case")
     parser.add_argument("-core", "--core-id", type=int, default=2,
@@ -346,9 +464,13 @@ def create_argument_parser() -> ArgumentParser:
     parser.add_argument("-S", "--scale-factor", type=float, default=1.1,
                        help="Scale of parameters growth between test cases.")
     parser.add_argument("-dt", "--diff-threshold", type=float, default=0.5,
-                       help="Difference threshold for the analyser.")
+                       help="Difference threshold for the threshold analyzer (ignored for other analyzer).")
     parser.add_argument("-ft", "--freq-threshold", type=float, default=0.5,
-                       help="Frequency threshold for the analyser.")
+                       help="Frequency threshold for the threshold analyzer (ignored for other analyzer).")
+    parser.add_argument("-st", "--stat-threshold", type=float, default=0.5,
+                       help="Stats threshold for the Chi-Square analyzer (ignored for other analyzer).")
+    parser.add_argument("-ot", "--outliers-threshold", type=float, default=0.2,
+                       help="Outliers threshold for the Chi-Square analyzer (ignored for other analyzer).")
     parser.add_argument("-s", "--seed", type=int, default=123456789,
                        help="Seed for random generation")
     parser.add_argument("-w", "--warmup-count", type=int, default=1,
@@ -356,6 +478,8 @@ def create_argument_parser() -> ArgumentParser:
     parser.add_argument("-a", "--aggregate-func", type=str, default="avg",
                        choices=["avg", "min", "max", "median"],
                        help="Function used to aggregate measurements")
+    parser.add_argument("-A", "--analyzer-type", type=str, default="threshold",
+                       choices=["chi", "threshold"])
     parser.add_argument("-conf", "--config-file", type=str,
                        help="Performance counters configuration file")
     parser.add_argument("-i", "--instruction-spec", type=str,
@@ -371,7 +495,9 @@ def create_argument_parser() -> ArgumentParser:
                        help="Enable debug mode")
     parser.add_argument("-P", "--plot", action="store_true",
                        help="Plot results")
-    
+    parser.add_argument("-C", "--color", action="store_true",
+                       help="Colorize counter measurements line by line for better visibility.")
+
     return parser
 
 
@@ -383,22 +509,27 @@ def main():
         
         # Create configuration from arguments
         config = FuzzerConfig(
-            num_test_cases=args.num_test_cases,
+            template=args.template,
+            num_fuzzing_rounds=args.num_fuzzing_rounds,
             program_size=args.program_size,
             core_id=args.core_id,
             mem_accesses=args.mem_accesses,
             scale_factor=args.scale_factor,
             difference_threshold=args.diff_threshold,
             frequency_threshold=args.freq_threshold,
+            stat_threshold=args.stat_threshold,
+            outliers_threshold=args.outliers_threshold,
             seed=args.seed,
             warmup_count=args.warmup_count,
             aggregate_func=args.aggregate_func,
+            analyzer_type=args.analyzer_type,
             config_file=args.config_file,
             instruction_spec=args.instruction_spec,
             instruction_filter=args.instruction_filter,
             out_directory=args.out_directory,
             debug=args.debug,
-            plot=args.plot
+            plot=args.plot,
+            color=args.color
         )
         
         # Run fuzzer
