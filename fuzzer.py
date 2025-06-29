@@ -46,6 +46,7 @@ class FuzzerConfig:
     out_directory: str = ""
     debug: bool = False
     plot: bool = False
+    verbose : bool = False
     color : bool = False
 
     def __post_init__(self):
@@ -234,8 +235,8 @@ class TestCaseRunner:
 
         # Specifically for DIV
         # print(len(variable_inputs))
-        for i in range(self.n_reps):
-            variable_inputs[i * (self.config.warmup_count + self.n_inputs) + self.config.warmup_count].values = [0x04000000, 0x0, 0x02000000, 0x01000000]
+        # for i in range(self.n_reps):
+        #     variable_inputs[i * (self.config.warmup_count + self.n_inputs) + self.config.warmup_count].values = [0x04000000, 0x0, 0x02000000, 0x01000000]
 
         write_inputs(constant_inputs, variable_inputs)
         
@@ -495,6 +496,8 @@ def create_argument_parser() -> ArgumentParser:
                        help="Enable debug mode")
     parser.add_argument("-P", "--plot", action="store_true",
                        help="Plot results")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                       help="Print diostribution of traces when reporting violations.")
     parser.add_argument("-C", "--color", action="store_true",
                        help="Colorize counter measurements line by line for better visibility.")
 
@@ -529,6 +532,7 @@ def main():
             out_directory=args.out_directory,
             debug=args.debug,
             plot=args.plot,
+            verbose=args.verbose,
             color=args.color
         )
         

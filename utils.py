@@ -26,7 +26,7 @@ def write_inputs(constant_inputs : List[int], variable_inputs : List[VarInput]):
 
 def initialize_experiment(testcase : str = None, num_inputs : int = None, config : str = None, seed : int = None, cpu : int = None,
                           num_measurements : int = None, warmup_count : int = None, aggregate_func : str = None):
-    params = " -df " 
+    params = ""
     # If testcase is given, only write testcase and quit. 
     if testcase:
         params += f"-asm {testcase} "

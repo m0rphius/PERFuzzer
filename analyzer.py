@@ -10,6 +10,7 @@ from tqdm import tqdm, TqdmWarning
 from abc import ABC, abstractmethod
 from collections import Counter
 from scipy import stats
+from statistics import quantiles, median
 
 import warnings
 warnings.filterwarnings("ignore", category=TqdmWarning, module="tqdm")
@@ -49,7 +50,8 @@ class Analyzer(ABC):
 
     def __init__(self):
         # A cache to hold the results of priming experiments (lowers amount of runs)
-        self.prime_cache = {}
+        self.priming_cache = {}
+        self.violations = []
 
     from fuzzer import FuzzerConfig
     def analyze(self, fuzzer_output : str, test_code : str, inputs : Tuple[List[int], List[VarInput]], 
@@ -70,10 +72,10 @@ class Analyzer(ABC):
         assert len(inputs_pairs) == n_inputs * (n_inputs - 1) / 2 # nCr(n_inputs,2)
 
         # For priming
-        self.prime_cache.clear()
+        self.priming_cache.clear()
 
         found = 0
-        violations = ""
+        violations_str = ""
         with tqdm(total=config.n_counters * len(inputs_pairs), desc="analyzing results", colour="green") as pbar:
             for counter, counter_traces in enumerate(fuzzing_round_trace): 
                 for i, (Ii, Ij) in enumerate(inputs_pairs):
@@ -83,12 +85,15 @@ class Analyzer(ABC):
                     # Differences above thresholds
                     if not self.compare_ctraces(ctrace_Ii, ctrace_Ij) and \
                        (not self.__prime(test_code, n_reps, n_inputs, config, inputs, (Ii,Ij), counter)):
-                        violations += f"{Bcolors.FAIL}[V]:{Bcolors.ENDC}{(Ii,Ij)} | {config.counter_ids[counter]}\n"
+                        violations_str += f"{Bcolors.FAIL}[V] {Bcolors.ENDC}{(Ii,Ij)} | {config.counter_ids[counter]}\n"
+                        if config.verbose:
+                            violations_str += self.__traces_pretty_print(ctrace_Ii, ctrace_Ij) + "\n"
+                        # counter1.items()} vs. {counter2.items()}\n{counter1_f}\n{counter2_f}\n\n"
                         found += 1
                     pbar.update(1)
 
         if found != 0:
-            print(violations)
+            print(violations_str)
 
         return found
 
@@ -132,7 +137,7 @@ class Analyzer(ABC):
         id1 = pair[0]
         id2 = pair[1]
 
-        temp = self.prime_cache.get((id1, id2), None)
+        temp = self.priming_cache.get((id1, id2), None)
 
         if temp: # "Hit"
             output12 = temp[0]
@@ -195,14 +200,11 @@ class Analyzer(ABC):
                     except Exception as e:
                         raise AnalyzerError(f"Error in priming: {e}")
                 
-            self.prime_cache[(id1,id2)] = (output12, output21)
-        # Extrace CounterTraces
+            self.priming_cache[(id1,id2)] = (output12, output21)
+
+        # Extract CounterTraces
         traces12 : List[List[CounterTrace]] = self.__create_fuzzing_round_trace(output12, config, n_inputs)
         traces21 : List[List[CounterTrace]] = self.__create_fuzzing_round_trace(output21, config, n_inputs)
-
-        # if counter == 1 and id1 == 0:
-        #     print("TRACES21_id2: ", traces21[counter][id2].trace)
-        #     print("TRACES12_id2: ", traces12[counter][id2].trace)
 
         # Check id2 at id1 vs. id1 at id1
         traces12_id1 = traces12[counter][id1]
@@ -223,9 +225,59 @@ class Analyzer(ABC):
         """ Conduct equality testing between two CounterTraces """
         pass
 
+    def remove_outliers(self, trace : List[int], method : str = "mad") -> List[int]:
+        """ Remove outliers using the IQR method """
+        if method == "iqr":
+            return self.__iqr_filter(trace)
+        elif method == "mad":
+            return self.__mad_filter(trace)
+        
+        return None
+
+    def __iqr_filter(self, trace : List[int]) -> List[int]:
+        quants = quantiles(trace, n=4)
+        q1 = quants[0]
+        q3 = quants[2]
+        iqr = q3 - q1
+
+        l = q1 - 1.5 * iqr
+        r = q3 + 1.5 * iqr
+        res = [v for v in trace if v >= l and v <= r]
+        return res
+
+    def __mad_filter(self, trace : List[int]) -> List[int]: 
+        m = median(trace)
+        devs = [abs(v - m) for v in trace]
+        mad = median(devs)
+
+        res = [v for (i,v) in enumerate(trace) if devs[i] <= 3 * mad]
+        return res
     
+    def __traces_pretty_print(self, t1 : CounterTrace, t2 : CounterTrace):
+        """ Print the traces in an eye-friendly format """
+        c1 = Counter(t1.trace)
+        c2 = Counter(t2.trace)
+        widths = [8, 9, 9]  # Define column widths
 
+        def line(char="-", joint="+"):
+            return joint + joint.join(char * w for w in widths) + joint + '\n'
 
+        def row(values):
+            return "| " + " | ".join(f"{v:>{w-2}}" for v, w in zip(values, widths)) + " |\n"
+
+        res = line("-", "+")
+        res += row(["Value", "Trace 1", "Trace 2"])
+        res += line("-", "+")
+
+        all_keys = sorted(set(c1) | set(c2))
+        for k in all_keys:
+            v1 = c1.get(k, 0)
+            v2 = c2.get(k, 0)
+
+            res += row([k, v1, v2])
+        
+            res += line("-", "+")
+        return res
 
 class ChiAnalyzer(Analyzer):
     """
@@ -243,28 +295,32 @@ class ChiAnalyzer(Analyzer):
     def compare_ctraces(self, t1 : CounterTrace, t2 : CounterTrace) -> bool:
         """ Use the Chi-Square test to compare CounterTraces """
         assert len(t1.trace) == len(t2.trace), "Traces aren't compatible!"
-        n = len(t1.trace)
-        f = self.outliers_threshold
-        counter1 = Counter(t1.trace)
-        counter2 = Counter(t2.trace)
-        keys = set(counter1.keys()) | set(counter2.keys())
-        keys = [key for key in list(keys) if counter1[key] >= f * n and counter2[key] >= f * n]
-        if len(keys) == 0:
-            return False
-        observed = [counter1[k] for k in keys] + [counter2[k] for k in keys]
-        totals = [counter1[k] + counter2[k] for k in keys]
-        grand_total = sum(totals)
-        total1= sum([counter1[k] for k in keys])
-        total2= sum([counter2[k] for k in keys])
-        # print(total1)
-        # print(total2)
-        expected1 = [(totals[k] / grand_total) * total1 for k in range(len(keys))]
-        expected2 = [(totals[k] / grand_total) * total2 for k in range(len(keys))]
-        expected = expected1 + expected2
-        ddof = len(keys) - 1
-        stat, _ = stats.chisquare(observed, expected, ddof=ddof)
-        stat /= (total1 + total2)
-        return stat < self.stat_threshold
+
+        # Filter outliers
+        filtered_combined : List[int] = self.remove_outliers(t1.trace + t2.trace, method="mad")
+        t1_filtered = [x for x in t1.trace if x in filtered_combined]
+        t2_filtered = [x for x in t2.trace if x in filtered_combined]
+        
+        # t1_filtered = t1.trace
+        # t2_filtered = t2.trace
+
+        # Shouldn't get here
+        assert len(t1_filtered) != 0 and len(t2_filtered) != 0
+        
+        counter1 = Counter(t1_filtered)
+        counter2 = Counter(t2_filtered)
+        keys = sorted(set(counter1) | set(counter2))
+
+        obs1 = [counter1.get(k, 0) for k in keys]
+        obs2 = [counter2.get(k, 0) for k in keys]
+
+        contingency_table = [obs1, obs2]  # Rows: groups, Columns: categories
+
+        chi2, p_value, _, _ = stats.chi2_contingency(contingency_table)
+
+        chi2 = chi2 / (len(t1_filtered) + len(t2_filtered))
+        # Return True if the two traces are statistically similar
+        return chi2 < self.stat_threshold
 
 
 class ThresholdAnalyzer(Analyzer): 
