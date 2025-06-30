@@ -15,7 +15,7 @@ from statistics import quantiles, median
 import warnings
 warnings.filterwarnings("ignore", category=TqdmWarning, module="tqdm")
 
-from fuzzer import VarInput
+from fuzzer import Input
 from utils import (
     write_inputs,
     initialize_experiment
@@ -54,7 +54,7 @@ class Analyzer(ABC):
         self.violations = []
 
     from fuzzer import FuzzerConfig
-    def analyze(self, fuzzer_output : str, test_code : str, inputs : Tuple[List[int], List[VarInput]], 
+    def analyze(self, fuzzer_output : str, test_code : str, inputs : List[Input], 
                 config : FuzzerConfig, n_reps : int, n_inputs : int):
         """  
         Analyze an entire fuzzing round trace and search for violations
@@ -132,7 +132,7 @@ class Analyzer(ABC):
         return traces
 
     def __prime(self, test_code : str, n_reps : int, n_inputs : int, config : FuzzerConfig, 
-                inputs : Tuple[List[int], List[VarInput]], pair : Tuple[int, int], 
+                inputs : List[Input], pair : Tuple[int, int], 
                 counter : int) -> bool: 
         id1 = pair[0]
         id2 = pair[1]
@@ -143,16 +143,13 @@ class Analyzer(ABC):
             output12 = temp[0]
             output21 = temp[1]
         else:
-            c_inputs = inputs[0] # constant inputs
-            v_inputs = inputs[1] # variable inputs
-
             # Version 1: id1 <- id2
-            v_inputs12 = v_inputs.copy()
+            inputs12 = inputs.copy()
             for rep in range(n_reps):
-                v_inputs12[rep*(config.warmup_count + n_inputs) + config.warmup_count + id1] = \
-                      v_inputs12[rep*(config.warmup_count + n_inputs) + config.warmup_count + id2]
+                inputs12[rep*(config.warmup_count + n_inputs) + config.warmup_count + id1] = \
+                      inputs12[rep*(config.warmup_count + n_inputs) + config.warmup_count + id2]
             
-            write_inputs(c_inputs, v_inputs12)
+            write_inputs(inputs12)
 
             # Configure experiment
             initialize_experiment(
@@ -174,12 +171,12 @@ class Analyzer(ABC):
                         raise AnalyzerError(f"Error in priming: {e}")
             
             # Version 2: id2 <- id1
-            v_inputs21 = v_inputs.copy()
+            inputs21 = inputs.copy()
             for rep in range(n_reps):
-                v_inputs21[rep*(config.warmup_count + n_inputs) + config.warmup_count + id2] = \
-                      v_inputs21[rep*(config.warmup_count + n_inputs) + config.warmup_count + id1]
+                inputs21[rep*(config.warmup_count + n_inputs) + config.warmup_count + id2] = \
+                      inputs21[rep*(config.warmup_count + n_inputs) + config.warmup_count + id1]
 
-            write_inputs(c_inputs, v_inputs21)
+            write_inputs(inputs21)
 
             # Configure experiment
             initialize_experiment(
