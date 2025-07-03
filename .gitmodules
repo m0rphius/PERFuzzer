@@ -1,3 +1,0 @@
-[submodule "FuzzerBench"]
-	path = FuzzerBench
-	url = https://github.com/m0rphius/FuzzerBench.git
