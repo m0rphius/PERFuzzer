@@ -1,3 +1,4 @@
+from pathlib import Path
 import subprocess
 import numpy as np
 from typing import List
@@ -19,7 +20,17 @@ def write_inputs(inputs : List[Input]):
     with open("/sys/FuzzerBench/inputs", "wb") as f:
         for v in inputs_raw:
             f.write(int(v).to_bytes(length=4, byteorder='little'))
-        
+
+def write_mem(mem : List[int]):
+    with open("/sys/FuzzerBench/mem", "wb") as f:
+        for v in mem:
+            f.write(int(v).to_bytes(length=1, byteorder='little'))
+
+def makedirs(path : Path):
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except:
+        raise(ValueError(f"Couldn't open a directory at {path}"))
 
 def initialize_experiment(testcase : str = None, num_inputs : int = None, config : str = None, seed : int = None, cpu : int = None,
                           num_measurements : int = None, warmup_count : int = None, aggregate_func : str = None):

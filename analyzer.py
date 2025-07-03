@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from scipy import stats
 from statistics import quantiles, median
+from pathlib import Path
 
 import warnings
 warnings.filterwarnings("ignore", category=TqdmWarning, module="tqdm")
@@ -18,6 +19,7 @@ warnings.filterwarnings("ignore", category=TqdmWarning, module="tqdm")
 from fuzzer import Input
 from utils import (
     write_inputs,
+    makedirs,
     initialize_experiment
 )
 
@@ -38,6 +40,7 @@ class CounterTrace:
     """A trace of measurements for a specific counter"""
 
     def __init__(self, cname : str, trace : List[int]):
+        self.cname = cname
         self.trace = trace.copy()
 
 
@@ -54,8 +57,8 @@ class Analyzer(ABC):
         self.violations = []
 
     from fuzzer import FuzzerConfig
-    def analyze(self, fuzzer_output : str, test_code : str, inputs : List[Input], 
-                config : FuzzerConfig, n_reps : int, n_inputs : int):
+    def analyze(self, fuzzer_output : str, test_code : str, test_num : int, inputs : List[Input], 
+                config : FuzzerConfig, n_reps : int, n_inputs : int, memory_binary : List[int]):
         """  
         Analyze an entire fuzzing round trace and search for violations
 
@@ -75,6 +78,7 @@ class Analyzer(ABC):
         self.priming_cache.clear()
 
         found = 0
+        violations_dir = Path(str(config.out_directory) + "/violations") # Only opened if found violations
         violations_str = ""
         with tqdm(total=config.n_counters * len(inputs_pairs), desc="analyzing results", colour="green") as pbar:
             for counter, counter_traces in enumerate(fuzzing_round_trace): 
@@ -87,8 +91,19 @@ class Analyzer(ABC):
                        (not self.__prime(test_code, n_reps, n_inputs, config, inputs, (Ii,Ij), counter)):
                         violations_str += f"{Bcolors.FAIL}[V] {Bcolors.ENDC}{(Ii,Ij)} | {config.counter_ids[counter]}\n"
                         if config.verbose:
-                            violations_str += self.__traces_pretty_print(ctrace_Ii, ctrace_Ij) + "\n"
-                        # counter1.items()} vs. {counter2.items()}\n{counter1_f}\n{counter2_f}\n\n"
+                            pretty_violation = self.__traces_pretty_print(ctrace_Ii, ctrace_Ij)
+                            violations_str += pretty_violation + "\n"
+                            if config.debug:
+                               makedirs(violations_dir / str(test_num))
+                               violation_file = violations_dir / f"{Ii}_{Ij}_{ctrace_Ii.cname}"
+                               mem_image_file = violations_dir / "mem.bin"
+                               with open(mem_image_file, "wb") as f:
+                                   for v in memory_binary:
+                                       f.write(int(v).to_bytes(length=1, byteorder="little"))
+                               with open(violation_file, "w") as f:
+                                   f.write(f"{inputs[config.warmup_count + Ii]}\n{inputs[config.warmup_count + Ij]}\n\n" \
+                                           f"{pretty_violation}")
+
                         found += 1
                     pbar.update(1)
 
@@ -313,7 +328,7 @@ class ChiAnalyzer(Analyzer):
 
         contingency_table = [obs1, obs2]  # Rows: groups, Columns: categories
 
-        chi2, p_value, _, _ = stats.chi2_contingency(contingency_table)
+        chi2, _, _, _ = stats.chi2_contingency(contingency_table)
 
         chi2 = chi2 / (len(t1_filtered) + len(t2_filtered))
         # Return True if the two traces are statistically similar
