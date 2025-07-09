@@ -257,7 +257,6 @@ class TestCaseRunner:
         )
 
         formatted_code = f'"{test_code}"'
-        # formatted_code = f'"or rcx, 1\nand rdx, rcx\nshr rdx, 1\ndiv rcx"'
 
         if self.config.debug:
             self.output_manager.save_test_case(test_number, test_code)
@@ -297,9 +296,9 @@ class TestCaseRunner:
     
     def _run_experiment_with_progress(self, test_number: int) -> str:
         """ Run experiment with progress bar """
-        desc = (f"[test {test_number}/{self.config.num_fuzzing_rounds}, "
+        desc = (f"[round {test_number}/{self.config.num_fuzzing_rounds}, "
                 f"nr={self.n_reps}, ni={self.n_inputs}, "
-                f"p={self.config.program_size}, m={self.config.mem_accesses}]")
+                f"p={self.config.program_size}]")
         
         output = ""
         
@@ -475,6 +474,8 @@ class CPUFuzzer:
                                                    self.test_runner.memory_binary)
                 if violations > 0:
                     break
+                else: 
+                    print("NO VIOLATIONS")
                 # Scale parameters for next iteration
                 if not self.config.inputs:
                     self.test_runner._scale_parameters()
@@ -499,6 +500,8 @@ class CPUFuzzer:
         print(self.output_manager._format_params(self.config))
         print(sep)
 
+        self.config.program_size = len(test_code.strip().splitlines())
+
         if self.config.debug:
             self.output_manager.save_params(self.config)
         
@@ -520,6 +523,8 @@ class CPUFuzzer:
                                                    self.test_runner.memory_binary)
                 if violations > 0:
                     break
+                else:
+                    print("NO VIOLATIONS")
                 # Scale parameters for next iteration
                 if not self.config.inputs:
                     self.test_runner._scale_parameters()
